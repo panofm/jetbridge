@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # One job, not six. A job bills a whole minute even when the script takes
+  # eight seconds, so splitting these checks apart costs money before any of
+  # them does work.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the changeset guard diffs against the base branch
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # The workspace is managed with Bun; the package it publishes targets
+      # Node, so the tests run under Node to prove that is still true.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: bun install --frozen-lockfile
+
+      - name: No private identifiers
+        run: bun scripts/check-no-private-identifiers.mjs
+
+      - name: Publishable changes carry a changeset
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=0
+          CHANGESET_BASE_REF=origin/${{ github.base_ref }} bun scripts/check-changeset.mjs
+
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run format:check
+      - run: bun run check:schema
+
+      # Before the tests, not after: some tests drive the built CLI as a
+      # subprocess, and against a stale dist/ they would pass while testing
+      # yesterday's binary.
+      - run: bun run build
+      - run: bun run test
