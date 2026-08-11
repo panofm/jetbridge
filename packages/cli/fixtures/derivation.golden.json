@@ -1,0 +1,403 @@
+{
+  "note": "Captured from the implementation this package was extracted from, by running every pure name-derivation transform over an input matrix. Project identifiers were replaced with neutral ones; the algorithm is word-based, so the replacement is exact as long as the substituted words carry the same noise-word status. The port must reproduce this file exactly.",
+  "noiseWords": [
+    "feat",
+    "fix",
+    "chore",
+    "refactor",
+    "docs",
+    "perf",
+    "test",
+    "ci",
+    "build",
+    "style",
+    "worktree",
+    "io",
+    "acme",
+    "app",
+    "dev"
+  ],
+  "baseBundleId": "io.acme.app.dev",
+  "defaultDisplayName": "Acme Dev",
+  "homeScreenLabelBudget": 14,
+  "suffixes": [
+    {
+      "input": "wave",
+      "sanitizeSuffix": "wave",
+      "variantTitle": "Wave",
+      "bundleId": "io.acme.app.dev.wave",
+      "displayName": "Acme Wave"
+    },
+    {
+      "input": "seeded-feed",
+      "sanitizeSuffix": "seededfeed",
+      "variantTitle": "Seeded Feed",
+      "bundleId": "io.acme.app.dev.seededfeed",
+      "displayName": "Acme Seeded Feed"
+    },
+    {
+      "input": "seeded_feed",
+      "sanitizeSuffix": "seededfeed",
+      "variantTitle": "Seeded Feed",
+      "bundleId": "io.acme.app.dev.seededfeed",
+      "displayName": "Acme Seeded Feed"
+    },
+    {
+      "input": "seededFeed",
+      "sanitizeSuffix": "seededfeed",
+      "variantTitle": "Seededfeed",
+      "bundleId": "io.acme.app.dev.seededfeed",
+      "displayName": "Acme Seededfeed"
+    },
+    {
+      "input": "Seeded Feed",
+      "sanitizeSuffix": "seededfeed",
+      "variantTitle": "Seeded Feed",
+      "bundleId": "io.acme.app.dev.seededfeed",
+      "displayName": "Acme Seeded Feed"
+    },
+    {
+      "input": "feat/seeded-feed",
+      "sanitizeSuffix": "seededfeed",
+      "variantTitle": "Seeded Feed",
+      "bundleId": "io.acme.app.dev.seededfeed",
+      "displayName": "Acme Seeded Feed"
+    },
+    {
+      "input": "fix/one",
+      "sanitizeSuffix": "one",
+      "variantTitle": "One",
+      "bundleId": "io.acme.app.dev.one",
+      "displayName": "Acme One"
+    },
+    {
+      "input": "chore/extract-ios-install-scripts",
+      "sanitizeSuffix": "extractiosinstallscripts",
+      "variantTitle": "Extract Ios Install Scripts",
+      "bundleId": "io.acme.app.dev.extractiosinstallscripts",
+      "displayName": "Acme Extract Ios Install Scripts"
+    },
+    {
+      "input": "refactor/a-b-c",
+      "sanitizeSuffix": "abc",
+      "variantTitle": "A B C",
+      "bundleId": "io.acme.app.dev.abc",
+      "displayName": "Acme A B C"
+    },
+    {
+      "input": "docs/x",
+      "sanitizeSuffix": "x",
+      "variantTitle": "X",
+      "bundleId": "io.acme.app.dev.x",
+      "displayName": "Acme X"
+    },
+    {
+      "input": "perf/y",
+      "sanitizeSuffix": "y",
+      "variantTitle": "Y",
+      "bundleId": "io.acme.app.dev.y",
+      "displayName": "Acme Y"
+    },
+    {
+      "input": "test/z",
+      "sanitizeSuffix": "z",
+      "variantTitle": "Z",
+      "bundleId": "io.acme.app.dev.z",
+      "displayName": "Acme Z"
+    },
+    {
+      "input": "ci/pipeline",
+      "sanitizeSuffix": "pipeline",
+      "variantTitle": "Pipeline",
+      "bundleId": "io.acme.app.dev.pipeline",
+      "displayName": "Acme Pipeline"
+    },
+    {
+      "input": "build/thing",
+      "sanitizeSuffix": "thing",
+      "variantTitle": "Thing",
+      "bundleId": "io.acme.app.dev.thing",
+      "displayName": "Acme Thing"
+    },
+    {
+      "input": "style/thing",
+      "sanitizeSuffix": "thing",
+      "variantTitle": "Thing",
+      "bundleId": "io.acme.app.dev.thing",
+      "displayName": "Acme Thing"
+    },
+    {
+      "input": "worktree/thing",
+      "sanitizeSuffix": "thing",
+      "variantTitle": "Thing",
+      "bundleId": "io.acme.app.dev.thing",
+      "displayName": "Acme Thing"
+    },
+    {
+      "input": "fix",
+      "sanitizeSuffix": "fix",
+      "variantTitle": "Fix",
+      "bundleId": "io.acme.app.dev.fix",
+      "displayName": "Acme Fix"
+    },
+    {
+      "input": "dev",
+      "sanitizeSuffix": "dev",
+      "variantTitle": "Dev",
+      "bundleId": "io.acme.app.dev.dev",
+      "displayName": "Acme Dev"
+    },
+    {
+      "input": "acme",
+      "sanitizeSuffix": "acme",
+      "variantTitle": "Acme",
+      "bundleId": "io.acme.app.dev.acme",
+      "displayName": "Acme Acme"
+    },
+    {
+      "input": "io",
+      "sanitizeSuffix": "io",
+      "variantTitle": "Io",
+      "bundleId": "io.acme.app.dev.io",
+      "displayName": "Acme Io"
+    },
+    {
+      "input": "app",
+      "sanitizeSuffix": "app",
+      "variantTitle": "App",
+      "bundleId": "io.acme.app.dev.app",
+      "displayName": "Acme App"
+    },
+    {
+      "input": "io.acme.dev.testtestes",
+      "sanitizeSuffix": "testtestes",
+      "variantTitle": "Testtestes",
+      "bundleId": "io.acme.app.dev.testtestes",
+      "displayName": "Acme Testtestes"
+    },
+    {
+      "input": "io.acme.app.dev.wave",
+      "sanitizeSuffix": "wave",
+      "variantTitle": "Wave",
+      "bundleId": "io.acme.app.dev.wave",
+      "displayName": "Acme Wave"
+    },
+    {
+      "input": "acme-dev-wave",
+      "sanitizeSuffix": "wave",
+      "variantTitle": "Wave",
+      "bundleId": "io.acme.app.dev.wave",
+      "displayName": "Acme Wave"
+    },
+    {
+      "input": "a--b",
+      "sanitizeSuffix": "ab",
+      "variantTitle": "A B",
+      "bundleId": "io.acme.app.dev.ab",
+      "displayName": "Acme A B"
+    },
+    {
+      "input": "--lead",
+      "sanitizeSuffix": "lead",
+      "variantTitle": "Lead",
+      "bundleId": "io.acme.app.dev.lead",
+      "displayName": "Acme Lead"
+    },
+    {
+      "input": "trail--",
+      "sanitizeSuffix": "trail",
+      "variantTitle": "Trail",
+      "bundleId": "io.acme.app.dev.trail",
+      "displayName": "Acme Trail"
+    },
+    {
+      "input": "a.b.c",
+      "sanitizeSuffix": "abc",
+      "variantTitle": "A B C",
+      "bundleId": "io.acme.app.dev.abc",
+      "displayName": "Acme A B C"
+    },
+    {
+      "input": "MiXeD-CaSe",
+      "sanitizeSuffix": "mixedcase",
+      "variantTitle": "Mixed Case",
+      "bundleId": "io.acme.app.dev.mixedcase",
+      "displayName": "Acme Mixed Case"
+    },
+    {
+      "input": "digits123",
+      "sanitizeSuffix": "digits123",
+      "variantTitle": "Digits123",
+      "bundleId": "io.acme.app.dev.digits123",
+      "displayName": "Acme Digits123"
+    },
+    {
+      "input": "123",
+      "sanitizeSuffix": "123",
+      "variantTitle": "123",
+      "bundleId": "io.acme.app.dev.123",
+      "displayName": "Acme 123"
+    },
+    {
+      "input": "a1b2c3",
+      "sanitizeSuffix": "a1b2c3",
+      "variantTitle": "A1b2c3",
+      "bundleId": "io.acme.app.dev.a1b2c3",
+      "displayName": "Acme A1b2c3"
+    },
+    {
+      "input": "a-very-long-branch-name-indeed",
+      "sanitizeSuffix": "averylongbranchnameindeed",
+      "variantTitle": "A Very Long Branch Name Indeed",
+      "bundleId": "io.acme.app.dev.averylongbranchnameindeed",
+      "displayName": "Acme A Very Long Branch Name Indeed"
+    },
+    {
+      "input": "twelvechars1",
+      "sanitizeSuffix": "twelvechars1",
+      "variantTitle": "Twelvechars1",
+      "bundleId": "io.acme.app.dev.twelvechars1",
+      "displayName": "Acme Twelvechars1"
+    },
+    {
+      "input": "thirteenchar1",
+      "sanitizeSuffix": "thirteenchar1",
+      "variantTitle": "Thirteenchar1",
+      "bundleId": "io.acme.app.dev.thirteenchar1",
+      "displayName": "Acme Thirteenchar1"
+    },
+    {
+      "input": "fourteenchars1",
+      "sanitizeSuffix": "fourteenchars1",
+      "variantTitle": "Fourteenchars1",
+      "bundleId": "io.acme.app.dev.fourteenchars1",
+      "displayName": "Acme Fourteenchars1"
+    },
+    {
+      "input": "fifteenchars123",
+      "sanitizeSuffix": "fifteenchars123",
+      "variantTitle": "Fifteenchars123",
+      "bundleId": "io.acme.app.dev.fifteenchars123",
+      "displayName": "Acme Fifteenchars123"
+    }
+  ],
+  "displayNameOverrides": [
+    {
+      "rawSuffix": "wave",
+      "explicit": "Custom",
+      "out": "Custom"
+    },
+    {
+      "rawSuffix": "",
+      "explicit": "",
+      "out": "Acme Dev"
+    },
+    {
+      "rawSuffix": "",
+      "explicit": "Custom",
+      "out": "Custom"
+    }
+  ],
+  "names": [
+    {
+      "input": "Acme Wave",
+      "out": "Acme Wave"
+    },
+    {
+      "input": "Wave",
+      "out": "Wave"
+    },
+    {
+      "input": "Wave 2",
+      "out": "Wave 2"
+    },
+    {
+      "input": "Wave_2",
+      "out": "Wave_2"
+    },
+    {
+      "input": "Wave-2",
+      "out": "Wave-2"
+    },
+    {
+      "input": "Wave.2",
+      "out": "Wave.2"
+    },
+    {
+      "input": "Wave!!!",
+      "out": "Wave"
+    },
+    {
+      "input": "Wave / Test",
+      "out": "Wave  Test"
+    },
+    {
+      "input": "  Wave  ",
+      "out": "  Wave  "
+    },
+    {
+      "input": "Ünïcödé Wave",
+      "out": "ncd Wave"
+    },
+    {
+      "input": "emoji 🌊 wave",
+      "out": "emoji  wave"
+    },
+    {
+      "input": "a",
+      "out": "a"
+    }
+  ],
+  "ascEntityNames": [
+    {
+      "input": "Acme Wave",
+      "out": "Acme Wave"
+    },
+    {
+      "input": "Acme_Hello_World",
+      "out": "Acme Hello World"
+    },
+    {
+      "input": "Acme-Hello-World",
+      "out": "Acme Hello World"
+    },
+    {
+      "input": "Acme.Hello.World",
+      "out": "Acme Hello World"
+    },
+    {
+      "input": "Acme   Wave",
+      "out": "Acme Wave"
+    },
+    {
+      "input": " Acme Wave ",
+      "out": "Acme Wave"
+    },
+    {
+      "input": "Wave123",
+      "out": "Wave123"
+    },
+    {
+      "input": "Wave!!!",
+      "out": "Wave"
+    },
+    {
+      "input": "A_B",
+      "out": "A B"
+    }
+  ],
+  "bundleIds": [
+    {
+      "suffix": "",
+      "out": "io.acme.app.dev"
+    },
+    {
+      "suffix": "wave",
+      "out": "io.acme.app.dev.wave"
+    },
+    {
+      "suffix": "seededfeed",
+      "out": "io.acme.app.dev.seededfeed"
+    }
+  ]
+}
