@@ -181,17 +181,10 @@ describe('variant targets', () => {
 
   it('accepts an app plus an extension', () => {
     const result = withTargets([
-      { name: 'Acme', capabilities: ['PUSH_NOTIFICATIONS'] },
+      { name: 'Acme', entitlements: 'ios/Acme.entitlements' },
       { name: 'Widget', bundleIdSuffix: 'uploadwidget' },
     ]);
     expect(result.ok).toBe(true);
-  });
-
-  it('defaults a target to no capabilities', () => {
-    const result = withTargets([{ name: 'Acme' }]);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.config.variant.targets[0]!.capabilities).toEqual([]);
   });
 
   it('requires exactly one target to be the app itself', () => {
@@ -237,15 +230,6 @@ describe('variant targets', () => {
         }),
       ).toContainEqual(expect.stringContaining('one bundle-id segment'));
     }
-  });
-
-  it('refuses a capability that is not an App Store Connect type', () => {
-    expect(
-      errorsFor({
-        ...minimal,
-        variant: { displayName: 'A', targets: [{ name: 'App', capabilities: ['push'] }] },
-      }),
-    ).toContainEqual(expect.stringContaining('capability type'));
   });
 });
 

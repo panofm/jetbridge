@@ -71,7 +71,7 @@ const config = testConfig({
   variant: {
     displayName: 'Acme Dev',
     targets: [
-      { name: 'Acme', capabilities: ['PUSH_NOTIFICATIONS'] },
+      { name: 'Acme', variantEntitlements: 'ios/Acme.variant.entitlements' },
       { name: 'Upload Widget', bundleIdSuffix: 'uploadwidget' },
     ],
   },
@@ -225,7 +225,7 @@ describe('ensureCapabilities', () => {
     );
   });
 
-  it('does nothing when a target declares no capabilities', async () => {
+  it('does nothing when there are no capabilities to enable', async () => {
     const { client, calls } = recordingClient([]);
     await ensureCapabilities(client, 'ROW1', []);
     expect(calls).toHaveLength(0);
@@ -484,6 +484,40 @@ describe('provisionVariant', () => {
       provisionVariant(boundary, project, { suffix: 'wave', displayName: 'Acme Wave' }),
     ).rejects.toThrow(JetbridgeError);
     expect(boundary.requests).toHaveLength(0);
+  });
+
+  /**
+   * The capability list is derived from the target's entitlements, so this is
+   * what actually reaches Apple. A hand-written list could disagree with the
+   * file the build signs against; this pins that it cannot.
+   */
+  it('enables exactly the capabilities the variant entitlements declare', async () => {
+    const answers = answersForFullRun();
+    const boundary = boundaryWithCredentials({
+      files: {
+        '/home/dev/.appstoreconnect/private_keys/AuthKey_KEY1.p8': KEY_PEM,
+        '/w/ios/Acme.variant.entitlements': `<plist version="1.0"><dict>
+	<key>aps-environment</key><string>development</string>
+	<key>com.apple.developer.associated-domains</key>
+	<array><string>applinks:acme.example</string></array>
+	<key>com.apple.developer.team-identifier</key><string>ABCDE12345</string>
+</dict></plist>`,
+      },
+      requests: answers.map((a) => ({ url: a.match, status: a.status, body: a.body })),
+    });
+
+    await provisionVariant(boundary, project, { suffix: 'wave', displayName: 'Acme Wave' });
+
+    const enabled = boundary.requests
+      .filter((request) => request.url.includes('/v1/bundleIdCapabilities'))
+      .map(
+        (request) =>
+          (JSON.parse(request.body!) as { data: { attributes: { capabilityType: string } } }).data
+            .attributes.capabilityType,
+      );
+    // The extension declares no entitlements file, so it asks for nothing —
+    // and `team-identifier` is not a capability, so it is skipped.
+    expect(enabled).toEqual(['PUSH_NOTIFICATIONS', 'ASSOCIATED_DOMAINS']);
   });
 
   it('refuses when the team has no enabled devices', async () => {

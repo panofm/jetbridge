@@ -255,14 +255,6 @@
                 "pattern": "^[a-z0-9]+$",
                 "type": "string"
               },
-              "capabilities": {
-                "default": [],
-                "items": {
-                  "pattern": "^[A-Z0-9_]+$",
-                  "type": "string"
-                },
-                "type": "array"
-              },
               "entitlements": {
                 "minLength": 1,
                 "type": "string"

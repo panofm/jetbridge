@@ -76,7 +76,7 @@ Every variant registers a bundle id and a profile with Apple, permanently. `jetb
   "variant": {
     "displayName": "Acme Dev",
     "targets": [
-      { "name": "Acme", "capabilities": ["PUSH_NOTIFICATIONS"] },
+      { "name": "Acme", "entitlements": "ios/Acme/Acme.entitlements" },
       { "name": "UploadWidget", "bundleIdSuffix": "uploadwidget" },
     ],
   },

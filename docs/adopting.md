@@ -197,7 +197,7 @@ The fix is a second file with those entitlements removed, used only for a varian
 
 1. Copy the target's entitlements file beside the original, e.g. `Acme/Acme.variant.entitlements`.
 2. Remove every entitlement the App Store Connect API cannot grant. In practice: `com.apple.security.application-groups`, `com.apple.developer.applesignin`, and anything else your team enabled by hand in the developer portal rather than through the API.
-3. Keep the rest. `aps-environment` for push stays, as long as the target lists `PUSH_NOTIFICATIONS` in `capabilities` — jetbridge enables that one through the API for you.
+3. Keep the rest. `aps-environment` for push stays: jetbridge reads this file and enables `PUSH_NOTIFICATIONS` on the registered bundle id for you.
 4. Add the file to the project. It does not need to be in a build phase; the swap only rewrites a build setting.
 
 ### Declaring the pair
@@ -210,13 +210,16 @@ The fix is a second file with those entitlements removed, used only for a varian
       "name": "Acme",
       "entitlements": "ios/Acme/Acme.entitlements",
       "variantEntitlements": "ios/Acme/Acme.variant.entitlements",
-      "capabilities": ["PUSH_NOTIFICATIONS"],
     },
   ],
 }
 ```
 
 Both paths are relative to the project root and must stay inside it.
+
+There is no capability list to keep in step. jetbridge reads `variantEntitlements` — the shipping `entitlements` file when there is no variant one — and enables the matching App Store Connect capabilities on the registered bundle id. `aps-environment` becomes `PUSH_NOTIFICATIONS`, `com.apple.developer.associated-domains` becomes `ASSOCIATED_DOMAINS`, and so on. An entitlement it does not recognise is skipped, because Apple adds entitlements faster than any table can follow. A target with no entitlements file asks for no capabilities, which is right for an app that needs none.
+
+This is also why the reduced file is the one it reads: asking the public API for a capability it cannot grant fails the run, and the reduced file is exactly the list of what it can.
 
 For a variant build, jetbridge rewrites the `CODE_SIGN_ENTITLEMENTS` line in `project.pbxproj` to the reduced file, and restores the original bytes the moment the build returns — before the install runs, and on `SIGINT`, `SIGTERM` or `SIGHUP` as well. Only that one line changes. A plain build swaps nothing.
 

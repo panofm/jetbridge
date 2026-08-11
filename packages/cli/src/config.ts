@@ -74,13 +74,6 @@ const targetSchema = z.object({
    * fails against a profile that does not carry them.
    */
   variantEntitlements: relativePath.optional(),
-  /**
-   * Capabilities to enable on the registered bundle id, e.g.
-   * `PUSH_NOTIFICATIONS`. Only what the public API can actually deliver.
-   */
-  capabilities: z
-    .array(z.string().regex(/^[A-Z0-9_]+$/, 'an App Store Connect capability type'))
-    .default([]),
 });
 
 const projectSchema = z.object({

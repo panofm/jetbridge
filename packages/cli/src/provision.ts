@@ -20,6 +20,7 @@ import {
   type AscResource,
 } from './asc.js';
 import type { Boundary } from './boundary.js';
+import { capabilitiesFor } from './capabilities.js';
 import { labelPrefixFor, type Config, type TargetConfig } from './config.js';
 import { fail, type Project } from './project.js';
 import { ascEntityName, bundleIdFor } from './variant.js';
@@ -288,7 +289,7 @@ export async function provisionVariant(
       bundleId,
       targetEntityName(target, options.displayName),
     );
-    await ensureCapabilities(client, rowId, target.capabilities);
+    await ensureCapabilities(client, rowId, capabilitiesFor(boundary, project, target));
     registered.push({ target, bundleId, rowId });
   }
 

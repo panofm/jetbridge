@@ -60,17 +60,13 @@ const variantConfig = (overrides: Record<string, unknown> = {}): Config =>
 
 describe('profileSettingName', () => {
   it('is JETBRIDGE_PROFILE_APP for the app target', () => {
-    expect(profileSettingName({ name: 'Acme', capabilities: [] })).toBe('JETBRIDGE_PROFILE_APP');
+    expect(profileSettingName({ name: 'Acme' })).toBe('JETBRIDGE_PROFILE_APP');
   });
 
   it('is the uppercased bundle-id segment for an extension', () => {
-    expect(
-      profileSettingName({
-        name: 'Upload Widget',
-        bundleIdSuffix: 'uploadwidget',
-        capabilities: [],
-      }),
-    ).toBe('JETBRIDGE_PROFILE_UPLOADWIDGET');
+    expect(profileSettingName({ name: 'Upload Widget', bundleIdSuffix: 'uploadwidget' })).toBe(
+      'JETBRIDGE_PROFILE_UPLOADWIDGET',
+    );
   });
 });
 
