@@ -68,6 +68,26 @@ const targetSchema = z.object({
   capabilities: z
     .array(z.string().regex(/^[A-Z0-9_]+$/, 'an App Store Connect capability type'))
     .default([]),
+  /**
+   * Build setting carrying this target's profile name. The project's xcconfig
+   * has to read it — `PROVISIONING_PROFILE_SPECIFIER = $(JETBRIDGE_PROFILE_APP)`.
+   */
+  profileSetting: identifier.optional(),
+});
+
+/**
+ * Build settings jetbridge passes on the xcodebuild command line. The project
+ * decides what to do with them; these are just the names both sides agree on.
+ */
+const buildSettingNamesSchema = z.object({
+  /** Appended to the bundle id, e.g. `.wave`. */
+  bundleSuffix: identifier.default('JETBRIDGE_BUNDLE_SUFFIX'),
+  /** The home-screen label. */
+  displayName: identifier.default('JETBRIDGE_DISPLAY_NAME'),
+  /** Set to `Manual` for a variant, so the build signs against our profiles. */
+  signStyle: identifier.default('JETBRIDGE_SIGN_STYLE'),
+  /** Optional provenance stamp, e.g. the short commit SHA. */
+  gitSha: identifier.default('JETBRIDGE_GIT_SHA'),
 });
 
 const projectSchema = z.object({
@@ -91,6 +111,15 @@ const projectSchema = z.object({
   xcodegen: z.boolean().default(false),
   /** Icon shown on the OTA install page, relative to the project root. */
   appIcon: relativePath.optional(),
+  /**
+   * Device types a cabled install targets. `devicectl` reports an iPad's
+   * platform as `iOS` too, so a platform check would sweep a paired iPad into
+   * the install set of an iPhone-only app.
+   */
+  deviceTypes: z
+    .array(z.enum(['iPhone', 'iPad']))
+    .min(1)
+    .default(['iPhone']),
 });
 
 const configurationsSchema = z.object({
@@ -118,6 +147,7 @@ const variantSchema = z.object({
   noiseWords: z.array(z.string().min(1)).optional(),
   /** Every target that needs its own registered bundle id. */
   targets: z.array(targetSchema).default([]),
+  buildSettings: buildSettingNamesSchema.prefault({}),
   /** Name given to generated provisioning profiles. Defaults to the label prefix. */
   profilePrefix: z.string().min(1).optional(),
 });
