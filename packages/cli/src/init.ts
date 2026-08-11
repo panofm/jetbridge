@@ -534,22 +534,19 @@ async function create(
     'Release',
   );
 
-  const ascKeyId = await ask({
-    field: 'credentials.ascKeyId',
-    flag: '--asc-key-id-env',
-    message: 'Environment variable holding the App Store Connect key id',
-    given: options.ascKeyIdEnv,
-    detected: { value: 'ASC_API_KEY_ID', source: 'the jetbridge default' },
-    validate: envNameProblem,
-  });
-  const ascIssuerId = await ask({
-    field: 'credentials.ascIssuerId',
-    flag: '--asc-issuer-id-env',
-    message: 'Environment variable holding the App Store Connect issuer id',
-    given: options.ascIssuerIdEnv,
-    detected: { value: 'ASC_API_ISSUER_ID', source: 'the jetbridge default' },
-    validate: envNameProblem,
-  });
+  // Not asked. Almost nobody renames these, the question reads as "type your
+  // key id" when it wants a variable NAME, and the config is a text file that
+  // anyone with a reason can edit. A flag still sets them for the rare project
+  // that already has its own names.
+  const ascKeyId = options.ascKeyIdEnv ?? 'ASC_API_KEY_ID';
+  const ascIssuerId = options.ascIssuerIdEnv ?? 'ASC_API_ISSUER_ID';
+  for (const [flag, name] of [
+    ['--asc-key-id-env', ascKeyId],
+    ['--asc-issuer-id-env', ascIssuerId],
+  ] as const) {
+    const problem = envNameProblem(name);
+    if (problem) fail(`${flag} ${name}: ${problem}`);
+  }
 
   let xcodegen = false;
   if (detection.projectYml) {

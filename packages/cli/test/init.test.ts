@@ -310,22 +310,21 @@ describe('credentials', () => {
     expect(text).not.toContain('SENTINEL-ISSUER-VALUE');
   });
 
-  it('asks for a plain name and wraps it, so nobody types ${…} at a prompt', async () => {
-    const h = harness({ env: { MY_KEY: 'k', MY_ISSUER: 'i' } });
-    const { result } = await run(h, {
-      ...fullAnswers,
-      'credentials.ascKeyId': 'MY_KEY',
-      'credentials.ascIssuerId': 'MY_ISSUER',
-    });
-    expect(result.config?.credentials.ascKeyId).toBe('${MY_KEY}');
-    expect(result.config?.credentials.ascIssuerId).toBe('${MY_ISSUER}');
+  it('never asks about credential variable names', async () => {
+    // The question read as "type your key id" while wanting a variable NAME,
+    // and almost nobody renames these. The prompter throws on an unscripted
+    // question, so answering nothing here IS the assertion.
+    const h = harness({ env: { ASC_API_KEY_ID: 'k', ASC_API_ISSUER_ID: 'i' } });
+    const { result } = await run(h, fullAnswers);
+    expect(result.config?.credentials.ascKeyId).toBe('${ASC_API_KEY_ID}');
+    expect(result.config?.credentials.ascIssuerId).toBe('${ASC_API_ISSUER_ID}');
   });
 
   it('refuses a name the reference form could not hold', async () => {
-    // Caught at the prompt rather than at the end: `${MY-KEY}` is not a
-    // variable reference, and the config would reject it after the fact.
+    // A project with its own names still sets them by flag, and `MY-KEY` is
+    // not a variable reference — caught before anything is written.
     const h = harness();
-    await expect(run(h, { ...fullAnswers, 'credentials.ascKeyId': 'MY-KEY' })).rejects.toThrow(
+    await expect(run(h, fullAnswers, { ascKeyIdEnv: 'MY-KEY' })).rejects.toThrow(
       /an environment variable name/,
     );
   });
