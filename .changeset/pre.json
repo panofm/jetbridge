@@ -4,5 +4,11 @@
   "initialVersions": {
     "jetbridge": "0.0.0"
   },
-  "changesets": ["adhoc-certificate", "cold-pandas-argue", "env-files", "timed-steps-and-json"]
+  "changesets": [
+    "capabilities-from-entitlements",
+    "cold-pandas-argue",
+    "derive-configurations-and-entitlements",
+    "derive-project-facts",
+    "fixed-build-setting-names"
+  ]
 }

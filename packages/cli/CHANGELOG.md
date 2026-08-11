@@ -1,5 +1,68 @@
 # jetbridge
 
+## 0.1.0-rc.2
+
+### Minor Changes
+
+- [`1576527`](https://github.com/panofm/jetbridge/commit/157652777bdc9851af37c39380863a2d7bbaac93) Thanks [@adamazad](https://github.com/adamazad)! - Capabilities come from the entitlements file. **Breaking config change.**
+
+  `variant.targets[].capabilities` is gone. Delete it — a config that still carries it is not an error, the key is ignored. jetbridge now reads the target's `variantEntitlements` file (the `entitlements` file when there is no variant one) and enables the App Store Connect capabilities its keys imply: `aps-environment` → `PUSH_NOTIFICATIONS`, `com.apple.developer.associated-domains` → `ASSOCIATED_DOMAINS`, `com.apple.security.application-groups` → `APP_GROUPS`, and thirteen more.
+
+  A hand-kept list drifts from the file it is supposed to describe: the config says `PUSH_NOTIFICATIONS`, someone edits the entitlements, and nothing notices until a build signs against a profile missing a capability. The entitlements file already states the same facts, so it is now the only place that states them.
+
+  Notes on what changes for a project that upgrades:
+
+  - A target with no entitlements file asks for no capabilities. That is the common case and it is fine.
+  - The reduced `variantEntitlements` file is preferred deliberately. It is where a project drops what the public API cannot grant, so deriving from the shipping file would ask Apple for capabilities it refuses.
+  - An entitlement key jetbridge does not recognise is skipped. Apple adds entitlements constantly and an unknown one must never fail a build.
+  - An entitlements file that is declared but not on disk yields no capabilities; one that is on disk and does not parse fails the run.
+  - If a target has only a shipping `entitlements` file that declares app groups or Sign in with Apple, jetbridge now asks App Store Connect to enable them where a hand-written empty `capabilities` list previously asked for nothing. Give that target a `variantEntitlements` file with those keys removed — which is what a variant build needs anyway.
+
+- [`f397049`](https://github.com/panofm/jetbridge/commit/f397049e5ff8c6d81e2145d8aadc80c41ce63cfb) Thanks [@adamazad](https://github.com/adamazad)! - `configurations.available` and `variant.targets[].entitlements` are gone from the config. Both repeated something `project.pbxproj` already states, and a copy that goes stale fails a build that would have worked.
+
+  **Build configurations** are read from the project's own configuration list at build time, and `configurations.wired`, `sim` and `archive` are checked against it. Renaming a configuration in Xcode no longer needs a config edit, and a configuration only your project knows about now just works. If the project file cannot be read, the check is skipped and `xcodebuild` decides — refusing a build that would have worked is the worse mistake.
+
+  **Each target's entitlements** are read from its `CODE_SIGN_ENTITLEMENTS`. Only `variantEntitlements` stays in the config, because the reduced file is genuinely new information the project does not carry.
+
+  That removes an ambiguity about how these paths are spelled. `CODE_SIGN_ENTITLEMENTS` is relative to the Xcode project directory (`Acme/Acme.entitlements`); a config path is relative to the project root (`ios/Acme/Acme.entitlements`). The swap had to match the project's spelling byte for byte, so a config written the way the schema documents produced a `from` side that matched nothing — a loud failure, but one whose message blamed a stale project rather than the spelling. The `from` side now comes from the project itself, and `variantEntitlements` is re-expressed against the same directory before it is substituted in.
+
+  `variantEntitlements` keeps the documented root-relative spelling, and a variant build now checks the file is there **before** it registers anything at Apple, quoting the absolute path it looked at. A path spelled against the wrong directory used to surface mid-build with a profile already minted.
+
+  `jetbridge init` no longer writes either removed field. Existing configs keep working — an unknown key is ignored — but both can be deleted.
+
+- [`f397049`](https://github.com/panofm/jetbridge/commit/f397049e5ff8c6d81e2145d8aadc80c41ce63cfb) Thanks [@adamazad](https://github.com/adamazad)! - Three more config fields come from the project. **Breaking config change.**
+
+  `variant.targets[].bundleIdSuffix` and `project.projectYml` are gone, and `project.xcodeproj` is now optional. Each of them restated something the project or the directory already says, and a hand-kept copy goes stale in silence.
+
+  - **`targets[].bundleIdSuffix`** — read from `PRODUCT_BUNDLE_IDENTIFIER` on each target. The app is the target whose id every other id extends, and an extension's segment is the remainder: `io.acme.app.dev.uploadwidget` under `io.acme.app.dev` gives `uploadwidget`. A target is now `{ "name", "variantEntitlements" }` and nothing more. Delete the key.
+  - **`project.projectYml`** — a `project.yml` or `project.yaml` beside the project is found when it is needed. Delete the key. `project.xcodegen` stays, because regenerating before every build is a choice; it now fails clearly if it is on and no spec is beside the project.
+  - **`project.xcodeproj`** — inferred when `iosDir` holds exactly one `.xcodeproj`. Keep it only when the directory holds several; the error lists what it found. `project.xcworkspace` is unchanged and still wins when set.
+
+  A generated project — `project.yml` committed, `.xcodeproj` gitignored — keeps working on a fresh clone, where there is nothing to infer yet. Loading succeeds (`bundles ls` never builds anything), the name is resolved again the moment XcodeGen writes the project, and every command that needs the file and cannot find it now says to run `xcodegen generate` rather than pointing at `project.iosDir`. `generateProject` also moved ahead of provisioning in the cabled and over-the-air flows, because provisioning is what reads the project for each extension's bundle id — and it is the step that permanently registers things with Apple.
+
+  Two consequences worth knowing before you upgrade:
+
+  - With more than one target, an unreadable project file is now fatal rather than quiet. Reading it is the only way to know an extension is an extension, and carrying on would register it under the app's own bundle id and mint a profile that signs and then refuses to install. A single-target app never reads the project at all, so it is unaffected.
+  - Three schema checks moved from the config to the project, where the fact actually lives: exactly one target is the app, no two targets share a bundle id, and a target's id is inside the app's. They are reported against the project file now, and they name the ids.
+
+  What stays in the config, because none of it is duplication: `targets[].name` is a selection — a project has test targets and extensions that must not get variant treatment. `project.scheme` is a real choice when a project has more than one. `project.teamId`, `project.baseBundleId` and `variant.displayName` are the dev build's identity, deliberately allowed to differ from what the project declares for release.
+
+- [`260bcfd`](https://github.com/panofm/jetbridge/commit/260bcfd26900b297cbde1f2d267f866689cccac0) Thanks [@adamazad](https://github.com/adamazad)! - Build setting names are fixed, not configurable. **Breaking config change.**
+
+  `variant.buildSettings` and `targets[].profileSetting` are gone. A config that still sets either is not an error — the keys are ignored, so delete them, and do not read the build from a name they used to map. jetbridge passes these names on the `xcodebuild` command line, and your project consumes them as they are:
+
+  - `JETBRIDGE_SUFFIX` — the bundle-id suffix, e.g. `.seededfeed`
+  - `JETBRIDGE_DISPLAY_NAME` — the home-screen label
+  - `JETBRIDGE_SIGN_STYLE` — `Manual` for a variant
+  - `JETBRIDGE_GIT_SHA` — the provenance stamp, when there is one
+  - `JETBRIDGE_PROFILE_<TARGET>` — the generated profile name, one per target
+
+  To upgrade:
+
+  1. Delete `variant.buildSettings` and every `profileSetting` from `jetbridge.config.json`.
+  2. Rename `JETBRIDGE_BUNDLE_SUFFIX` to `JETBRIDGE_SUFFIX` in your xcconfig, `project.yml`, or Xcode build settings. This is the one rename that breaks a build silently: the suffix never reaches the bundle id, so the variant installs under the plain id and overwrites the app it was meant to sit beside.
+  3. If you had mapped a name to a real Xcode setting — `CODE_SIGN_STYLE`, `INFOPLIST_KEY_CFBundleDisplayName`, `PROVISIONING_PROFILE_SPECIFIER` — read the `JETBRIDGE_*` setting from that setting instead: `CODE_SIGN_STYLE = $(JETBRIDGE_SIGN_STYLE)`. See [Adopting jetbridge](docs/adopting.md#4-the-xcconfig-wiring).
+
 ## 0.1.0-rc.1
 
 ### Minor Changes
