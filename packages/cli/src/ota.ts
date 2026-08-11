@@ -15,7 +15,14 @@
 import { join } from 'node:path';
 import { fillTemplate, readTemplate } from './assets.js';
 import type { Boundary } from './boundary.js';
-import { authArgs, buildNumber, generateProject, requireToolchain, runHook } from './build.js';
+import {
+  authArgs,
+  buildNumber,
+  buildNumberDetail,
+  generateProject,
+  requireToolchain,
+  runHook,
+} from './build.js';
 import type { Config, OtaConfig } from './config.js';
 import { withEntitlementSwap } from './entitlements.js';
 import {
@@ -37,14 +44,20 @@ import {
   type ObjectStore,
   type S3Factory,
 } from './storage.js';
+import { bundleIdFor } from './variant.js';
 import { scratchPath } from './wired.js';
 
 /**
- * The profile a signed export needs. An ad hoc profile — not the development
- * one a cabled install uses — is what lets an .ipa install over the air on the
- * devices it names.
+ * The profile a signed export needs.
+ *
+ * Every one of these installs over the air on the devices its profile names.
+ * They differ in the CERTIFICATE they require, which is the whole reason the
+ * choice is exposed: a development profile signs with the certificate every
+ * developer already has, while ad hoc and in-house need a distribution
+ * certificate the team may not have issued.
  */
 const PROFILE_TYPES: Record<OtaConfig['exportMethod'], string> = {
+  development: 'IOS_APP_DEVELOPMENT',
   'ad-hoc': 'IOS_APP_ADHOC',
   enterprise: 'IOS_APP_INHOUSE',
 };
@@ -515,23 +528,24 @@ async function runArchive(
   project: Project,
   request: ArchiveRequest,
 ): Promise<void> {
-  boundary.log.step(
-    `archiving ${request.configuration}/${project.config.project.scheme} (build ${request.buildNumber})`,
-  );
-  const result = await boundary.exec.run('xcodebuild', archiveArgs(boundary, project, request), {
-    cwd: project.root,
-    allowFail: true,
+  await boundary.report.run('archive', 'archived', async (step) => {
+    step.detail(buildNumberDetail(request.buildNumber));
+    step.data({ buildNumber: request.buildNumber, configuration: request.configuration });
+    const result = await boundary.exec.run('xcodebuild', archiveArgs(boundary, project, request), {
+      cwd: project.root,
+      allowFail: true,
+    });
+    if (!result.ok) {
+      const tail = (result.stderr || result.stdout).trim().split('\n').slice(-20).join('\n');
+      fail(`xcodebuild archive failed:\n${tail}`);
+    }
+    if (!boundary.fs.exists(request.archivePath)) {
+      fail(
+        `the archive reported success but produced nothing at ${request.archivePath}.\n` +
+          '  Check that the scheme is shared and archives from Xcode.',
+      );
+    }
   });
-  if (!result.ok) {
-    const tail = (result.stderr || result.stdout).trim().split('\n').slice(-20).join('\n');
-    fail(`xcodebuild archive failed:\n${tail}`);
-  }
-  if (!boundary.fs.exists(request.archivePath)) {
-    fail(
-      `the archive reported success but produced nothing at ${request.archivePath}.\n` +
-        '  Check that the scheme is shared and archives from Xcode.',
-    );
-  }
 }
 
 /** Export the .ipa and return its path. The filename is the scheme's, not ours. */
@@ -540,28 +554,29 @@ async function runExport(
   project: Project,
   options: { archivePath: string; exportDir: string; optionsPlist: string },
 ): Promise<string> {
-  boundary.log.step('exporting the .ipa');
-  const result = await boundary.exec.run(
-    'xcodebuild',
-    exportArgs(boundary, project.config, options),
-    { cwd: project.root, allowFail: true },
-  );
-  if (!result.ok) {
-    const tail = (result.stderr || result.stdout).trim().split('\n').slice(-20).join('\n');
-    fail(`xcodebuild -exportArchive failed:\n${tail}`);
-  }
-  const produced = boundary.fs
-    .readdir(options.exportDir)
-    .filter((name) => name.endsWith('.ipa'))
-    .sort();
-  const ipa = produced[0];
-  if (!ipa) {
-    fail(
-      `the export produced no .ipa in ${options.exportDir}.\n` +
-        '  Check that ota.exportMethod matches a certificate this machine holds.',
+  return boundary.report.run('export', 'exported .ipa', async () => {
+    const result = await boundary.exec.run(
+      'xcodebuild',
+      exportArgs(boundary, project.config, options),
+      { cwd: project.root, allowFail: true },
     );
-  }
-  return join(options.exportDir, ipa);
+    if (!result.ok) {
+      const tail = (result.stderr || result.stdout).trim().split('\n').slice(-20).join('\n');
+      fail(`xcodebuild -exportArchive failed:\n${tail}`);
+    }
+    const produced = boundary.fs
+      .readdir(options.exportDir)
+      .filter((name) => name.endsWith('.ipa'))
+      .sort();
+    const ipa = produced[0];
+    if (!ipa) {
+      fail(
+        `the export produced no .ipa in ${options.exportDir}.\n` +
+          '  Check that ota.exportMethod matches a certificate this machine holds.',
+      );
+    }
+    return join(options.exportDir, ipa);
+  });
 }
 
 // ─── the flow ────────────────────────────────────────────────────────────────
@@ -614,9 +629,41 @@ export async function otaInstall(
   // and an export to discover.
   credentials(boundary, ota);
 
+  const report = boundary.report;
   await requireToolchain(boundary, project, ['xcodebuild']);
-  await generateProject(boundary, project);
-  await runHook(boundary, project, 'preBuild');
+
+  const bundleId = bundleIdFor(options.suffix, config);
+  report.start({
+    command: 'link',
+    data: {
+      destination: 'ota',
+      bundleId,
+      displayName: options.displayName,
+      configuration,
+      suffix: options.suffix,
+    },
+    title: [options.displayName, bundleId, configuration],
+    rows: [
+      {
+        label: 'bucket',
+        text: `${ota.storage.bucket} (${ota.storage.region}) → ${ota.storage.publicBaseUrl}`,
+        event: 'bucket',
+        data: {
+          bucket: ota.storage.bucket,
+          region: ota.storage.region,
+          publicBaseUrl: ota.storage.publicBaseUrl,
+        },
+      },
+      {
+        label: 'signing',
+        text: options.suffix
+          ? `${ota.exportMethod} profiles for this variant, from Apple`
+          : `${ota.exportMethod}, against the project's own signing`,
+        event: 'signing',
+        data: { decision: options.suffix ? 'provision' : 'project', method: ota.exportMethod },
+      },
+    ],
+  });
 
   const work = join(scratchPath(boundary, options.suffix), 'ota');
   boundary.fs.rm(work, { recursive: true });
@@ -627,18 +674,22 @@ export async function otaInstall(
   // Ad hoc profiles, not development ones: a development profile signs an app
   // that installs down a cable and refuses to install over the air.
   const profiles: SigningProfiles = options.suffix
-    ? {
-        byTarget: Object.fromEntries(
-          (
-            await provisionVariant(boundary, project, {
-              suffix: options.suffix,
-              displayName: options.displayName,
-              profileType: PROFILE_TYPES[ota.exportMethod],
-            })
-          ).map((profile) => [profile.target, profile.profileName]),
-        ),
-      }
+    ? await report.run('provision', 'profiles', async (step) => {
+        const provisioned = await provisionVariant(boundary, project, {
+          suffix: options.suffix,
+          displayName: options.displayName,
+          profileType: PROFILE_TYPES[ota.exportMethod],
+        });
+        step.data({ profiles: provisioned.map((profile) => profile.profileName) });
+        step.detail(provisioned.map((profile) => profile.profileName).join(' + '));
+        return {
+          byTarget: Object.fromEntries(provisioned.map((p) => [p.target, p.profileName])),
+        };
+      })
     : { byTarget: {} };
+
+  await generateProject(boundary, project);
+  await runHook(boundary, project, 'preBuild');
 
   // The swap is restored the moment the archive returns. The export, the upload
   // and the preflight that follow do not need it, and a hang in any of them
@@ -675,11 +726,13 @@ export async function otaInstall(
     suffix: options.suffix,
     configuration,
   });
-  if (meta.dirty) boundary.log.warn('the working tree is dirty — this .ipa matches no commit');
+  if (meta.dirty) report.warn('the working tree is dirty — this .ipa matches no commit');
 
   await runHook(boundary, project, 'postBuild');
 
-  return publish(boundary, project, { ota, ipa, meta, s3: options.s3 });
+  const published = await publish(boundary, project, { ota, ipa, meta, s3: options.s3 });
+  report.done(true, { builds: published.builds, bundleId });
+  return published;
 }
 
 /**
@@ -703,41 +756,7 @@ export async function publish(
   const ipaBytes = boundary.fs.size(options.ipa);
   const ipaSizeLabel = megabytes(ipaBytes);
 
-  // One icon at the prefix root, referenced by every manifest, so the tile that
-  // appears while installing is the app's icon and not a grey placeholder.
-  const iconPath = config.project.appIcon ? project.path(config.project.appIcon) : '';
-  const iconUrl =
-    iconPath && boundary.fs.exists(iconPath) ? publicUrl(ota, key('icon.png')) : undefined;
-  if (iconUrl) {
-    await store.put(key('icon.png'), boundary.fs.readBytes(iconPath), 'image/png');
-  }
-
-  boundary.log.step(`uploading ${ipaSizeLabel} .ipa → ${ota.storage.bucket}/${buildKey(IPA_NAME)}`);
-  await store.put(
-    buildKey(IPA_NAME),
-    boundary.fs.readBytes(options.ipa),
-    'application/octet-stream',
-  );
-
   const manifestUrl = publicUrl(ota, buildKey('manifest.plist'));
-  await store.put(
-    buildKey('manifest.plist'),
-    renderManifestPlist({
-      bundleId: meta.bundleId,
-      bundleVersion: meta.version,
-      title: meta.appName,
-      ipaUrl: publicUrl(ota, buildKey(IPA_NAME)),
-      ...(iconUrl ? { displayImageUrl: iconUrl, fullSizeImageUrl: iconUrl } : {}),
-    }),
-    'text/xml',
-  );
-
-  await store.put(
-    buildKey('index.html'),
-    renderInstallPage(meta, { config, ota, manifestUrl, ipaSizeLabel }),
-    'text/html; charset=utf-8',
-  );
-
   const record: BuildRecord = {
     buildId,
     appName: meta.appName,
@@ -754,24 +773,65 @@ export async function publish(
     builtAt: meta.builtAt,
     uploadedAt: new Date(boundary.now() * 1000).toISOString(),
   };
-  const merged = mergeRecords(await readRegistry(store, key(REGISTRY_NAME)), record, ota.maxBuilds);
-  await store.put(key(REGISTRY_NAME), JSON.stringify(merged, null, 2), 'application/json');
-  await store.put(
-    key('index.html'),
-    renderIndexPage(merged, { config, ota, token, generatedAt: utcStamp(boundary.now()) }),
-    'text/html; charset=utf-8',
-  );
+
+  const merged = await boundary.report.run('upload', 'uploaded', async (step) => {
+    step.detail(`${ipaSizeLabel} → ${ota.storage.bucket}/${buildKey(IPA_NAME)}`);
+    step.data({ bytes: ipaBytes, key: buildKey(IPA_NAME), bucket: ota.storage.bucket });
+
+    // One icon at the prefix root, referenced by every manifest, so the tile
+    // that appears while installing is the app's icon and not a grey
+    // placeholder.
+    const iconPath = config.project.appIcon ? project.path(config.project.appIcon) : '';
+    const iconUrl =
+      iconPath && boundary.fs.exists(iconPath) ? publicUrl(ota, key('icon.png')) : undefined;
+    if (iconUrl) {
+      await store.put(key('icon.png'), boundary.fs.readBytes(iconPath), 'image/png');
+    }
+
+    await store.put(
+      buildKey(IPA_NAME),
+      boundary.fs.readBytes(options.ipa),
+      'application/octet-stream',
+    );
+    await store.put(
+      buildKey('manifest.plist'),
+      renderManifestPlist({
+        bundleId: meta.bundleId,
+        bundleVersion: meta.version,
+        title: meta.appName,
+        ipaUrl: publicUrl(ota, buildKey(IPA_NAME)),
+        ...(iconUrl ? { displayImageUrl: iconUrl, fullSizeImageUrl: iconUrl } : {}),
+      }),
+      'text/xml',
+    );
+    await store.put(
+      buildKey('index.html'),
+      renderInstallPage(meta, { config, ota, manifestUrl, ipaSizeLabel }),
+      'text/html; charset=utf-8',
+    );
+
+    const rows = mergeRecords(await readRegistry(store, key(REGISTRY_NAME)), record, ota.maxBuilds);
+    await store.put(key(REGISTRY_NAME), JSON.stringify(rows, null, 2), 'application/json');
+    await store.put(
+      key('index.html'),
+      renderIndexPage(rows, { config, ota, token, generatedAt: utcStamp(boundary.now()) }),
+      'text/html; charset=utf-8',
+    );
+    return rows;
+  });
 
   // Last, and never earlier: a printed URL that 403s costs a build cycle to
   // diagnose from the phone, where the only symptom is "Cannot connect".
-  await verifyReachable(boundary, ota, manifestUrl);
+  await boundary.report.run('verify', 'reachable', () =>
+    verifyReachable(boundary, ota, manifestUrl),
+  );
 
   const installUrl = publicUrl(ota, buildKey('index.html'));
   const indexUrl = publicUrl(ota, key('index.html'));
-  boundary.log.info(
-    `published ${meta.versionTag} (${ipaSizeLabel}) — open in Safari: ${installUrl}`,
-  );
-  boundary.log.info(`${merged.length} build(s) listed at ${indexUrl}`);
+  boundary.report.emit('link', { installUrl, indexUrl, manifestUrl, builds: merged.length });
+  boundary.report.note('');
+  boundary.report.note(`install  ${installUrl}`);
+  boundary.report.note(`builds   ${indexUrl}`);
   return { installUrl, indexUrl, manifestUrl, record, builds: merged.length };
 }
 
@@ -799,6 +859,6 @@ export async function reindex(
   await store.put(objectKey(ota, token, 'index.html'), page, 'text/html; charset=utf-8');
 
   const indexUrl = publicUrl(ota, objectKey(ota, token, 'index.html'));
-  boundary.log.info(`reindexed ${records.length} build(s) → ${indexUrl}`);
+  boundary.report.emit('reindex', { indexUrl, builds: records.length });
   return { indexUrl, builds: records.length };
 }

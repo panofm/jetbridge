@@ -199,7 +199,15 @@ const otaStorageSchema = z.object({
 
 const otaSchema = z.object({
   storage: otaStorageSchema,
-  exportMethod: z.enum(['ad-hoc', 'enterprise']).default('ad-hoc'),
+  /**
+   * `development` is the default, and it is not a compromise: it produces an
+   * .ipa that installs over the air on every device named in the profile, and
+   * it signs with the development certificate every Apple developer already
+   * has. `ad-hoc` and `enterprise` need a DISTRIBUTION certificate, which not
+   * every team member holds — asking for one without it fails inside Apple's
+   * API with a message about "no current certificates ... compatible with".
+   */
+  exportMethod: z.enum(['development', 'ad-hoc', 'enterprise']).default('development'),
   /** Builds kept on the index page before the oldest is dropped. */
   maxBuilds: z.number().int().positive().max(500).default(60),
   /** `path` puts an unguessable token in the URL; `none` assumes a private bucket. */

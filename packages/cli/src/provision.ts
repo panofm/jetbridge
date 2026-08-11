@@ -102,13 +102,26 @@ export async function ensureCapabilities(
 }
 
 /**
- * The development certificate whose private key is actually in this keychain.
+ * Which certificate kind a profile type is allowed to embed.
+ *
+ * Apple enforces the pairing and rejects a mismatch with a 409 that reads
+ * "There are no current certificates on this team matching the provided
+ * certificate IDs compatible with <TYPE> profiles" — which sounds like a
+ * missing certificate rather than the wrong KIND of one.
+ */
+export function certificateTypeFor(profileType: string): 'DEVELOPMENT' | 'DISTRIBUTION' {
+  return profileType === 'IOS_APP_DEVELOPMENT' ? 'DEVELOPMENT' : 'DISTRIBUTION';
+}
+
+/**
+ * The certificate whose private key is actually in this keychain.
  * The account may hold certificates belonging to other machines; signing with
  * one of those fails at build time with an error that names nothing useful.
  */
-export async function localDevelopmentCertificateId(
+export async function localCertificateId(
   boundary: Boundary,
   client: AscClient,
+  certificateType: 'DEVELOPMENT' | 'DISTRIBUTION' = 'DEVELOPMENT',
 ): Promise<string> {
   const identities = boundary.exec.runSync('security', [
     'find-identity',
@@ -118,7 +131,7 @@ export async function localDevelopmentCertificateId(
   ]);
   const certificates = await client.request<AscDocument>(
     'GET',
-    '/v1/certificates?filter[certificateType]=DEVELOPMENT&limit=50',
+    `/v1/certificates?filter[certificateType]=${certificateType}&limit=50`,
   );
   if (certificates.status !== 200) {
     fail(
@@ -130,10 +143,17 @@ export async function localDevelopmentCertificateId(
     return typeof displayName === 'string' && identities.stdout.includes(displayName);
   });
   if (!match) {
+    const distribution = certificateType === 'DISTRIBUTION';
     fail(
-      'no App Store Connect development certificate matches a signing identity in this keychain.\n' +
+      `no App Store Connect ${certificateType.toLowerCase()} certificate matches a signing ` +
+        'identity in this keychain.\n' +
         '  Create one in Xcode once (Settings › Accounts › Manage Certificates), or import the\n' +
-        "  existing certificate's private key into this keychain.",
+        "  existing certificate's private key into this keychain." +
+        (distribution
+          ? '\n  A distribution certificate is only needed for ota.exportMethod "ad-hoc" or\n' +
+            '  "enterprise". Set it to "development" to sign with the certificate you already\n' +
+            '  have — the build still installs over the air on every registered device.'
+          : ''),
     );
   }
   return match.id;
@@ -273,8 +293,9 @@ export async function provisionVariant(
   }
 
   // One certificate and one device list for every profile in the run: they are
-  // the same answer each time, and each lookup is a round trip to Apple.
-  const certificateId = await localDevelopmentCertificateId(boundary, client);
+  // the same answer each time, and each lookup is a round trip to Apple. The
+  // certificate KIND has to match the profile type, or Apple rejects the pair.
+  const certificateId = await localCertificateId(boundary, client, certificateTypeFor(profileType));
   const deviceIds = await enabledDeviceIds(client);
   if (deviceIds.length === 0) {
     fail(

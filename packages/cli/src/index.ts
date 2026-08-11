@@ -3,7 +3,9 @@
  * the boundary injected — which is also why the whole tool is testable without
  * Xcode, a phone, an Apple team or a bucket.
  */
-export { isInteractive, nodeBoundary, nodeFileSystem } from './boundary.js';
+export { isInteractive, nodeBoundary, nodeFileSystem, nodeReporter } from './boundary.js';
+export { createReporter, formatDuration, silentReporter } from './reporter.js';
+export type { HeaderRow, Reporter, ReporterOptions, RunStart, Step } from './reporter.js';
 export type {
   Boundary,
   CommandCall,

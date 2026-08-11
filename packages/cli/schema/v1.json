@@ -113,8 +113,8 @@
           "type": "object"
         },
         "exportMethod": {
-          "default": "ad-hoc",
-          "enum": ["ad-hoc", "enterprise"],
+          "default": "development",
+          "enum": ["development", "ad-hoc", "enterprise"],
           "type": "string"
         },
         "maxBuilds": {

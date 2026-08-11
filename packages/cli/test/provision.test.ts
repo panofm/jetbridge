@@ -9,10 +9,11 @@ import { describe, expect, it } from 'vitest';
 import type { AscClient, AscResponse } from '../src/asc.js';
 import { JetbridgeError, projectFrom } from '../src/project.js';
 import {
+  certificateTypeFor,
   ensureBundleId,
   ensureCapabilities,
   enabledDeviceIds,
-  localDevelopmentCertificateId,
+  localCertificateId,
   profileDirectory,
   profileNameFor,
   profileUuid,
@@ -231,7 +232,56 @@ describe('ensureCapabilities', () => {
   });
 });
 
-describe('localDevelopmentCertificateId', () => {
+describe('certificateTypeFor', () => {
+  /**
+   * Apple enforces this pairing and rejects a mismatch with a 409 that reads
+   * like a MISSING certificate rather than the wrong kind of one. Asking for an
+   * ad hoc profile while looking up a development certificate is exactly how
+   * that failure reaches a user.
+   */
+  it('pairs a development profile with a development certificate', () => {
+    expect(certificateTypeFor('IOS_APP_DEVELOPMENT')).toBe('DEVELOPMENT');
+  });
+
+  it('pairs ad hoc and in-house profiles with a distribution certificate', () => {
+    expect(certificateTypeFor('IOS_APP_ADHOC')).toBe('DISTRIBUTION');
+    expect(certificateTypeFor('IOS_APP_INHOUSE')).toBe('DISTRIBUTION');
+    expect(certificateTypeFor('IOS_APP_STORE')).toBe('DISTRIBUTION');
+  });
+});
+
+describe('localCertificateId', () => {
+  it('asks Apple for the certificate kind it was given', async () => {
+    const boundary = boundaryWithCredentials();
+    const { client, calls } = recordingClient([
+      {
+        match: '/v1/certificates',
+        status: 200,
+        body: {
+          data: [
+            {
+              id: 'DIST',
+              type: 'certificates',
+              attributes: { displayName: 'Apple Development: Dev Eloper (SKAV8355Y7)' },
+            },
+          ],
+        },
+      },
+    ]);
+    await localCertificateId(boundary, client, 'DISTRIBUTION');
+    expect(calls[0]!.path).toContain('filter[certificateType]=DISTRIBUTION');
+  });
+
+  it('says how to avoid needing a distribution certificate at all', async () => {
+    const boundary = boundaryWithCredentials();
+    const { client } = recordingClient([
+      { match: '/v1/certificates', status: 200, body: { data: [] } },
+    ]);
+    await expect(localCertificateId(boundary, client, 'DISTRIBUTION')).rejects.toThrow(
+      /ota\.exportMethod/,
+    );
+  });
+
   it('picks the certificate whose private key is in this keychain', async () => {
     const boundary = boundaryWithCredentials();
     const { client } = recordingClient([
@@ -250,7 +300,7 @@ describe('localDevelopmentCertificateId', () => {
         },
       },
     ]);
-    expect(await localDevelopmentCertificateId(boundary, client)).toBe('MINE');
+    expect(await localCertificateId(boundary, client)).toBe('MINE');
   });
 
   it('asks the keychain for codesigning identities', async () => {
@@ -270,7 +320,7 @@ describe('localDevelopmentCertificateId', () => {
         },
       },
     ]);
-    await localDevelopmentCertificateId(boundary, client);
+    await localCertificateId(boundary, client);
     expect(boundary.commandLines()).toContain('security find-identity -v -p codesigning');
   });
 
@@ -291,7 +341,7 @@ describe('localDevelopmentCertificateId', () => {
         },
       },
     ]);
-    await localDevelopmentCertificateId(boundary, client);
+    await localCertificateId(boundary, client);
     expect(calls[0]!.path).toContain('filter[certificateType]=DEVELOPMENT');
   });
 
@@ -308,7 +358,7 @@ describe('localDevelopmentCertificateId', () => {
         },
       },
     ]);
-    await expect(localDevelopmentCertificateId(boundary, client)).rejects.toThrow(
+    await expect(localCertificateId(boundary, client)).rejects.toThrow(
       /matches a signing identity in this keychain/,
     );
   });
