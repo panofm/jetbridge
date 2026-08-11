@@ -164,8 +164,6 @@ const variantSchema = z.object({
   noiseWords: z.array(z.string().min(1)).optional(),
   /** Every target that needs its own registered bundle id. */
   targets: z.array(targetSchema).default([]),
-  /** Name given to generated provisioning profiles. Defaults to the label prefix. */
-  profilePrefix: z.string().min(1).optional(),
 });
 
 const hooksSchema = z.object({

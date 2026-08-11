@@ -33,6 +33,18 @@ export function projectSpecName(boundary: Boundary, directory: string): string |
 }
 
 /**
+ * What to say when the `.xcodeproj` is absent and a spec is there.
+ *
+ * The project is generated output, so the fix is to generate it — never to
+ * correct a path, which is what every other "cannot find the project" message
+ * in this tool means. One spelling, because a person who hits this from the
+ * build, the bundle ids, or a bare `bundles ls` is in the same situation.
+ */
+export const ungeneratedAdvice = (directory: string): string =>
+  `Run \`xcodegen generate\` in ${directory}, or set project.xcodegen so jetbridge runs it ` +
+  'for you.';
+
+/**
  * Which `.xcodeproj` to build.
  *
  * Inferred when the directory holds exactly one, which is the ordinary project.

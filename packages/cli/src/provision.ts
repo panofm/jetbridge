@@ -256,7 +256,7 @@ export function targetEntityName(target: ResolvedTarget, displayName: string): s
 }
 
 export function profileNameFor(target: ResolvedTarget, suffix: string, config: Config): string {
-  const prefix = config.variant.profilePrefix ?? labelPrefixFor(config);
+  const prefix = labelPrefixFor(config);
   return `${prefix} ${suffix} ${target.bundleIdSuffix ?? 'app'}`;
 }
 

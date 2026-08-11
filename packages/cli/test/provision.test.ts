@@ -411,11 +411,11 @@ describe('profileNameFor', () => {
     expect(profileNameFor(extension, 'wave', config)).toBe('Acme wave uploadwidget');
   });
 
-  it('honours an explicit profile prefix', () => {
+  it('takes its prefix from the display name, with nothing to configure', () => {
     const renamed = testConfig({
-      variant: { profilePrefix: 'JB', targets: [{ name: 'App' }] },
+      variant: { displayName: 'Widgets Dev', targets: [{ name: 'App' }] },
     });
-    expect(profileNameFor(renamed.variant.targets[0]!, 'wave', renamed)).toBe('JB wave app');
+    expect(profileNameFor(renamed.variant.targets[0]!, 'wave', renamed)).toBe('Widgets wave app');
   });
 });
 

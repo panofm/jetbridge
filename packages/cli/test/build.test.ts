@@ -259,7 +259,7 @@ describe('requireToolchain', () => {
       files: { '/w/ios/project.yml': 'name: Acme\n' },
     });
     await expect(requireToolchain(boundary, projectOf(), [])).rejects.toThrow(
-      /Generate the project first, then re-run\./,
+      /Run `xcodegen generate` in \/w\/ios, or set project\.xcodegen/,
     );
   });
 });

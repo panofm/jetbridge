@@ -10,6 +10,8 @@ Three more config fields come from the project. **Breaking config change.**
 - **`project.projectYml`** — a `project.yml` or `project.yaml` beside the project is found when it is needed. Delete the key. `project.xcodegen` stays, because regenerating before every build is a choice; it now fails clearly if it is on and no spec is beside the project.
 - **`project.xcodeproj`** — inferred when `iosDir` holds exactly one `.xcodeproj`. Keep it only when the directory holds several; the error lists what it found. `project.xcworkspace` is unchanged and still wins when set.
 
+A generated project — `project.yml` committed, `.xcodeproj` gitignored — keeps working on a fresh clone, where there is nothing to infer yet. Loading succeeds (`bundles ls` never builds anything), the name is resolved again the moment XcodeGen writes the project, and every command that needs the file and cannot find it now says to run `xcodegen generate` rather than pointing at `project.iosDir`. `generateProject` also moved ahead of provisioning in the cabled and over-the-air flows, because provisioning is what reads the project for each extension's bundle id — and it is the step that permanently registers things with Apple.
+
 Two consequences worth knowing before you upgrade:
 
 - With more than one target, an unreadable project file is now fatal rather than quiet. Reading it is the only way to know an extension is an extension, and carrying on would register it under the app's own bundle id and mint a profile that signs and then refuses to install. A single-target app never reads the project at all, so it is unaffected.

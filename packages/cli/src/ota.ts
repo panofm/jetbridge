@@ -610,6 +610,10 @@ export async function otaInstall(
   const archivePath = join(work, `${config.project.scheme}.xcarchive`);
   const exportDir = join(work, 'export');
 
+  // Before provisioning, not after: provisioning READS the project to work out
+  // each target's bundle id, and it is the step that mutates the Apple account.
+  await generateProject(boundary, project);
+
   // Ad hoc profiles, not development ones: a development profile signs an app
   // that installs down a cable and refuses to install over the air.
   const profiles: SigningProfiles = options.suffix
@@ -627,7 +631,6 @@ export async function otaInstall(
       })
     : { byTarget: {} };
 
-  await generateProject(boundary, project);
   await runHook(boundary, project, 'preBuild');
 
   // The swap is restored the moment the archive returns. The export, the upload

@@ -210,6 +210,48 @@ describe('simInstall', () => {
     expect(lines).toContain('/bin/sh -c echo after');
   });
 
+  /**
+   * A fresh clone of a generated project: `project.yml` is committed and the
+   * `.xcodeproj` is not. Refusing here would refuse the exact run jetbridge was
+   * configured to make work, so the toolchain check has to let it through and
+   * `generateProject` has to get its turn.
+   */
+  it('generates first on a fresh clone, instead of refusing a missing project', async () => {
+    const generated = testConfig({
+      project: { xcodeproj: undefined, xcodegen: true },
+      variant: { displayName: 'Acme Dev', targets: [{ name: 'Acme' }] },
+    });
+    const boundary = boundaryFor('wave');
+    boundary.fs.rm('/w/ios/Acme.xcodeproj', { recursive: true });
+    boundary.fs.write('/w/ios/project.yml', 'name: Acme\n');
+    // The stub writes nothing, so the run still ends short — but it ends AFTER
+    // xcodegen was given its chance, which is the whole point.
+    await expect(
+      simInstall(boundary, projectFrom('/w/jetbridge.config.json', generated, boundary), {
+        suffix: 'wave',
+        displayName: 'Acme Wave',
+      }),
+    ).rejects.toThrow(/the project has not been generated[\s\S]*xcodegen generate/);
+    expect(boundary.commandLines()).toContain('xcodegen generate');
+  });
+
+  it('names xcodegen when the project is generated but xcodegen is off', async () => {
+    const boundary = boundaryFor('wave');
+    boundary.fs.rm('/w/ios/Acme.xcodeproj', { recursive: true });
+    boundary.fs.write('/w/ios/project.yml', 'name: Acme\n');
+    const notGenerating = testConfig({
+      project: { xcodeproj: undefined },
+      variant: { displayName: 'Acme Dev', targets: [{ name: 'Acme' }] },
+    });
+    await expect(
+      simInstall(boundary, projectFrom('/w/jetbridge.config.json', notGenerating, boundary), {
+        suffix: 'wave',
+        displayName: 'Acme Wave',
+      }),
+    ).rejects.toThrow(/Run `xcodegen generate` in \/w\/ios, or set project\.xcodegen/);
+    expect(boundary.commandLines()).not.toContain('xcodegen generate');
+  });
+
   it('regenerates the project when the config says it is generated', async () => {
     const generated = testConfig({
       project: { xcodegen: true },

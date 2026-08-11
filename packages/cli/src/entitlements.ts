@@ -90,7 +90,7 @@ export function assertVariantEntitlements(boundary: Boundary, project: Project):
 }
 
 export const pbxprojPath = (project: Project): string =>
-  project.iosPath(project.config.project.xcodeproj ?? '', 'project.pbxproj');
+  project.iosPath(project.xcodeprojName() ?? '', 'project.pbxproj');
 
 export function applySwap(boundary: Boundary, project: Project, configuration: string): void {
   const path = pbxprojPath(project);

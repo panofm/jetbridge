@@ -77,7 +77,7 @@ describe('loadProject', () => {
         '/w/ios/Acme.xcodeproj/project.pbxproj': '// !$*UTF8*$!\n{}\n',
       }),
     );
-    expect(project.config.project.xcodeproj).toBe('Acme.xcodeproj');
+    expect(project.xcodeprojName()).toBe('Acme.xcodeproj');
     expect(project.xcodebuildTarget()).toEqual(['-project', '/w/ios/Acme.xcodeproj']);
   });
 
@@ -105,10 +105,29 @@ describe('loadProject', () => {
         '/w/ios/project.yml': 'name: Acme\n',
       }),
     );
-    expect(project.config.project.xcodeproj).toBeUndefined();
+    expect(project.xcodeprojName()).toBeUndefined();
     expect(() => project.xcodebuildTarget()).toThrow(
-      /no \.xcodeproj in \/w\/ios yet[\s\S]*Generate the project first/,
+      /the project has not been generated[\s\S]*Run `xcodegen generate` in \/w\/ios/,
     );
+  });
+
+  /**
+   * The invariant the generate step rests on: `generateProject` writes the
+   * `.xcodeproj` mid-run, and every step after it has to see a file that did
+   * not exist when the config was read. Caching the miss is what would break
+   * a fresh clone.
+   */
+  it('finds the project the moment generation writes it', () => {
+    const boundary = boundaryWith({
+      '/w/jetbridge.config.json': inferredConfig,
+      '/w/ios/project.yml': 'name: Acme\n',
+    });
+    const project = loadProject(boundary);
+    expect(project.xcodeprojName()).toBeUndefined();
+
+    boundary.fs.write('/w/ios/Acme.xcodeproj/project.pbxproj', '// !$*UTF8*$!\n{}\n');
+    expect(project.xcodeprojName()).toBe('Acme.xcodeproj');
+    expect(project.xcodebuildTarget()).toEqual(['-project', '/w/ios/Acme.xcodeproj']);
   });
 
   it('has nothing to infer from and says where it looked', () => {

@@ -15,6 +15,7 @@
  */
 import type { Boundary } from './boundary.js';
 import type { TargetConfig } from './config.js';
+import { projectSpecName, ungeneratedAdvice } from './project-layout.js';
 import { fail, type Project } from './project.js';
 import { projectFacts } from './xcodeproject.js';
 
@@ -46,6 +47,16 @@ function bundleIdsFrom(
 ): Record<string, string> {
   const facts = projectFacts(boundary, project);
   if (!facts) {
+    // A generated project reaches here from any command that reads targets
+    // without building — `bundles ls` never generates anything — so the advice
+    // has to be the one that actually helps.
+    const directory = project.iosPath();
+    if (projectSpecName(boundary, directory)) {
+      fail(
+        'the Xcode project has not been generated, and it is the only thing that says which ' +
+          `bundle id each target owns.\n  ${ungeneratedAdvice(directory)}`,
+      );
+    }
     fail(
       'could not read the Xcode project, and it is the only thing that says which bundle id ' +
         'each target owns.\n' +

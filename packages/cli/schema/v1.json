@@ -230,10 +230,6 @@
           },
           "type": "array"
         },
-        "profilePrefix": {
-          "minLength": 1,
-          "type": "string"
-        },
         "targets": {
           "default": [],
           "items": {

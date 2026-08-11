@@ -10,7 +10,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { Boundary } from './boundary.js';
 import { CONFIG_FILENAMES, formatConfigErrors, parseConfig, type Config } from './config.js';
 import { fail } from './errors.js';
-import { resolveXcodeproj } from './project-layout.js';
+import { resolveXcodeproj, ungeneratedAdvice } from './project-layout.js';
 
 // Re-exported so existing importers keep working; defined in errors.ts because
 // the boundary needs to throw without importing the layer above it.
@@ -25,6 +25,13 @@ export interface Project {
   path(...segments: string[]): string;
   /** Absolute path inside the Xcode project directory. */
   iosPath(...segments: string[]): string;
+  /**
+   * The `.xcodeproj` name, resolved. Undefined only for a workspace build, or
+   * for a generated project that XcodeGen has not produced yet — and it is
+   * re-resolved on each miss, so it finds the file the moment generation makes
+   * it. Never cache the answer across a generate step.
+   */
+  xcodeprojName(): string | undefined;
   /** The `-project` or `-workspace` argument pair for xcodebuild. */
   xcodebuildTarget(): [flag: string, path: string];
 }
@@ -43,39 +50,55 @@ export function findConfigFile(boundary: Boundary, from: string): string | null 
   }
 }
 
-export function projectFrom(configPath: string, config: Config): Project {
+export function projectFrom(configPath: string, config: Config, boundary?: Boundary): Project {
   const root = dirname(configPath);
   const path = (...segments: string[]): string => resolve(root, ...segments);
   const iosPath = (...segments: string[]): string =>
     resolve(root, config.project.iosDir, ...segments);
+
+  // Held rather than recomputed once it is known, but a MISS is never cached:
+  // `generateProject` writes the `.xcodeproj` mid-run, and everything after it
+  // has to see the file that did not exist when the config was read.
+  let found = config.project.xcodeproj;
+  const xcodeprojName = (): string | undefined => {
+    if (found ?? !boundary) return found;
+    found = resolveXcodeproj(boundary, iosPath(), config.project);
+    return found;
+  };
+
   return {
     root,
     configPath,
     config,
     path,
     iosPath,
+    xcodeprojName,
     xcodebuildTarget: () => {
       if (config.project.xcworkspace) {
         return ['-workspace', iosPath(config.project.xcworkspace)];
       }
-      if (!config.project.xcodeproj) {
-        // Only reachable for a generated project that has not been generated:
-        // resolution found a spec and no `.xcodeproj`, and deliberately let the
-        // run get this far so the message could be this one.
+      const xcodeproj = xcodeprojName();
+      if (!xcodeproj) {
         fail(
-          `no .xcodeproj in ${iosPath()} yet.\n` +
-            '  Generate the project first, then re-run — or set project.xcodegen to have ' +
-            'jetbridge do it.',
+          `no .xcodeproj in ${iosPath()} — the project has not been generated.\n` +
+            `  ${ungeneratedAdvice(iosPath())}`,
         );
       }
-      return ['-project', iosPath(config.project.xcodeproj)];
+      return ['-project', iosPath(xcodeproj)];
     },
   };
 }
 
-/** A project from a config that has not been through the edge resolution yet. */
+/**
+ * A project that can find its own `.xcodeproj`.
+ *
+ * The name is resolved once here so an unanswerable directory — several
+ * projects, or none with nothing to explain it — is reported at load rather
+ * than three steps into a run.
+ */
 export function projectAt(boundary: Boundary, configPath: string, config: Config): Project {
-  return projectFrom(configPath, resolveProjectFile(boundary, dirname(configPath), config));
+  resolveXcodeproj(boundary, resolve(dirname(configPath), config.project.iosDir), config.project);
+  return projectFrom(configPath, config, boundary);
 }
 
 export interface LoadOptions {
@@ -117,19 +140,4 @@ export function loadProject(boundary: Boundary, options: LoadOptions = {}): Proj
     );
   }
   return projectAt(boundary, configPath, result.config);
-}
-
-/**
- * Fill in the `.xcodeproj` the directory already names, once, here.
- *
- * Everything downstream reads `config.project.xcodeproj` — the pbxproj reader,
- * the entitlement swap, `xcodebuildTarget` — so inferring it at the edge keeps
- * all of them reading a single resolved value instead of each repeating the
- * search.
- */
-export function resolveProjectFile(boundary: Boundary, root: string, config: Config): Config {
-  const directory = resolve(root, config.project.iosDir);
-  const xcodeproj = resolveXcodeproj(boundary, directory, config.project);
-  if (xcodeproj === config.project.xcodeproj) return config;
-  return { ...config, project: { ...config.project, ...(xcodeproj ? { xcodeproj } : {}) } };
 }

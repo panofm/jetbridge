@@ -201,6 +201,12 @@ export async function wiredInstall(
   }
   boundary.fs.mkdirp(derivedData);
 
+  // Before provisioning, not after: provisioning READS the project to work out
+  // each target's bundle id, and it is the step that mutates the Apple account.
+  // A local generate that fails costs nothing; a registration made against a
+  // project that was about to change is permanent.
+  await generateProject(boundary, project);
+
   const profiles =
     plan.profiles ??
     (await report.run('provision', 'provisioned', async (step) => {
@@ -213,7 +219,6 @@ export async function wiredInstall(
       return { byTarget: Object.fromEntries(provisioned.map((p) => [p.target, p.profileName])) };
     }));
 
-  await generateProject(boundary, project);
   await runHook(boundary, project, 'preBuild');
 
   // The swap is restored the moment the build returns — before the install runs

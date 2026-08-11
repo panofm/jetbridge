@@ -482,3 +482,60 @@ describe('a variant run against cached profiles', () => {
     expect(boundary.humanOutput()).toContain('reusing Acme wave app (valid, covers 1 device(s))');
   });
 });
+
+/**
+ * A fresh clone of a generated project: `project.yml` committed, `.xcodeproj`
+ * gitignored. Provisioning READS the project to work out each extension's
+ * bundle id, so generation has to come first — and when there is still no
+ * project afterwards, the complaint has to name xcodegen rather than send
+ * someone hunting through `project.iosDir`.
+ */
+describe('a fresh clone of a generated project', () => {
+  const generated = () =>
+    testConfig({
+      project: { xcodeproj: undefined, xcodegen: true },
+      variant: { displayName: 'Acme Dev', targets: [{ name: 'Acme' }, { name: 'Upload Widget' }] },
+    });
+
+  const freshBoundary = (): FakeBoundary => {
+    const boundary = boundaryFor([device('DEV-A', 'iPhone A')], {
+      env: { ASC_API_KEY_ID: 'KEY1', ASC_API_ISSUER_ID: 'ISSUER1', ASC_API_KEY_PATH: '/k.p8' },
+      files: { '/w/ios/project.yml': 'name: Acme\n', '/k.p8': 'PEM' },
+      commands: [
+        { match: ['command', '-v'] },
+        { match: ['xcrun', 'devicectl', 'list', 'devices'] },
+        { match: ['xcodegen', 'generate'] },
+        { match: ['security', 'find-identity'], stdout: '' },
+      ],
+    });
+    boundary.fs.rm('/w/ios/Acme.xcodeproj', { recursive: true });
+    return boundary;
+  };
+
+  it('generates before provisioning, which is the step that reads the project', async () => {
+    const boundary = freshBoundary();
+    await expect(
+      wiredInstall(boundary, projectFrom('/w/jetbridge.config.json', generated(), boundary), {
+        suffix: 'wave',
+        displayName: 'Acme Wave',
+      }),
+    ).rejects.toThrow();
+    // The generator is a stub that writes nothing, so the run still ends short
+    // — but it ends AFTER xcodegen had its turn, and before anything was
+    // registered at Apple.
+    expect(boundary.commandLines()).toContain('xcodegen generate');
+    expect(boundary.requests).toEqual([]);
+  });
+
+  it('names xcodegen when the project is still not there', async () => {
+    const boundary = freshBoundary();
+    await expect(
+      wiredInstall(boundary, projectFrom('/w/jetbridge.config.json', generated(), boundary), {
+        suffix: 'wave',
+        displayName: 'Acme Wave',
+      }),
+    ).rejects.toThrow(
+      /the Xcode project has not been generated[\s\S]*Run `xcodegen generate` in \/w\/ios/,
+    );
+  });
+});

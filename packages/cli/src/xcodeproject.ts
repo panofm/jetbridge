@@ -39,7 +39,7 @@ export interface TargetEntitlements {
 
 /** The parsed project, or null when there is nothing readable to parse. */
 export function projectFacts(boundary: Boundary, project: Project): PbxprojFacts | null {
-  const xcodeproj = project.config.project.xcodeproj;
+  const xcodeproj = project.xcodeprojName();
   if (!xcodeproj) return null;
   const path = project.iosPath(xcodeproj, 'project.pbxproj');
   if (!boundary.fs.exists(path)) return null;

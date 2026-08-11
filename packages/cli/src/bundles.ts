@@ -130,7 +130,7 @@ export function groupVariants(
   protectedIds: Set<string>,
 ): RegisteredVariant[] {
   const prefix = `${config.project.baseBundleId}.`;
-  const profilePrefix = config.variant.profilePrefix ?? labelPrefixFor(config);
+  const profilePrefix = labelPrefixFor(config);
 
   return bundleIds
     .filter((bundle) => {

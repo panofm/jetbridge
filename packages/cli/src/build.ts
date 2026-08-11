@@ -11,7 +11,7 @@ import type { Boundary, CommandResult } from './boundary.js';
 import { resolveTargets } from './bundle-ids.js';
 import type { Config } from './config.js';
 import { fail, type Project } from './project.js';
-import { projectSpecName } from './project-layout.js';
+import { projectSpecName, ungeneratedAdvice } from './project-layout.js';
 import { signSettings, variantSettings, type SigningProfiles } from './signing.js';
 
 export interface BuildRequest {
@@ -110,12 +110,18 @@ export async function requireToolchain(
     const found = await boundary.exec.run('command', ['-v', binary], { allowFail: true });
     if (!found.ok) fail(`${binary} was not found on PATH`);
   }
+  // A generated project is absent this early on purpose — `generateProject`
+  // runs after the header, which is where a slow step belongs. Refusing here
+  // would refuse the run jetbridge was configured to make work.
+  const spec = projectSpecName(boundary, project.iosPath());
+  if (spec && project.config.project.xcodegen && !project.xcodeprojName()) return;
+
   const [, target] = project.xcodebuildTarget();
   if (!boundary.fs.exists(target)) {
     fail(
       `missing ${target}.\n` +
-        (projectSpecName(boundary, project.iosPath())
-          ? '  Generate the project first, then re-run.'
+        (spec
+          ? `  ${ungeneratedAdvice(project.iosPath())}`
           : '  Check project.iosDir and project.xcodeproj in the config.'),
     );
   }
