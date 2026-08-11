@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   bundleIdSuffixFrom,
   detectProject,
+  expandSettingRefs,
   findProjectDirectory,
   parsePbxproj,
   settingValue,
@@ -25,6 +26,37 @@ const projectFiles = (dir = 'ios'): Record<string, string> => ({
 });
 
 const boundaryWith = (files: Record<string, string>) => fakeBoundary({ cwd: '/repo', files });
+
+describe('build settings that reference other build settings', () => {
+  /**
+   * A project that supports variant builds necessarily templates its bundle
+   * id, and defines the referenced setting right beside it. Refusing to read
+   * that and asking someone to retype their own bundle id is the tool failing
+   * at the one thing it is looking at.
+   */
+  it('resolves a reference against the same configuration', () => {
+    expect(expandSettingRefs('io.acme.app.dev$(JETBRIDGE_SUFFIX)', { JETBRIDGE_SUFFIX: '' })).toBe(
+      'io.acme.app.dev',
+    );
+    expect(
+      expandSettingRefs('io.acme.app.dev$(JETBRIDGE_SUFFIX)', { JETBRIDGE_SUFFIX: '.wave' }),
+    ).toBe('io.acme.app.dev.wave');
+  });
+
+  it('resolves a chain of references', () => {
+    expect(expandSettingRefs('$(A)', { A: '$(B)', B: 'io.acme.app' })).toBe('io.acme.app');
+  });
+
+  it('leaves an unresolvable reference in place rather than guessing', () => {
+    expect(expandSettingRefs('io.acme.app$(NOWHERE)', {})).toBe('io.acme.app$(NOWHERE)');
+  });
+
+  it('gives up on a reference that refers to itself', () => {
+    // Bounded rather than recursive: a self-referencing setting is a broken
+    // project, not a reason to hang.
+    expect(expandSettingRefs('$(SELF)', { SELF: '$(SELF)' })).toBe('$(SELF)');
+  });
+});
 
 describe('parsePbxproj', () => {
   it('reads the project-level build configuration list', () => {

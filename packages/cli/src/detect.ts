@@ -297,13 +297,40 @@ const isExtension = (productType: string | undefined): boolean =>
  * carrying different bundle ids is normal, and the difference is the thing
  * worth showing.
  */
+/**
+ * Resolve `$(OTHER_SETTING)` references against the same configuration.
+ *
+ * A project that supports variant builds necessarily templates its bundle id —
+ * `io.acme.app.dev$(JETBRIDGE_SUFFIX)` — and defines the referenced setting
+ * right beside it, usually empty. Refusing to read that and asking the person
+ * to retype their own bundle id is the tool failing at the one thing it is
+ * looking at.
+ *
+ * Bounded, because a setting can reference itself. An unresolved reference is
+ * left in place, and the caller decides what that means.
+ */
+export function expandSettingRefs(
+  value: string,
+  values: Record<string, string>,
+  depth = 0,
+): string {
+  if (depth > 4 || !value.includes('$(')) return value;
+  const expanded = value.replace(/\$\(([A-Za-z_][A-Za-z0-9_]*)\)/g, (whole, name: string) =>
+    name in values ? values[name]! : whole,
+  );
+  return expanded === value ? value : expandSettingRefs(expanded, values, depth + 1);
+}
+
 export function settingValue(
   settings: Record<string, Record<string, string>>,
   key: string,
   preferred: string[],
 ): { value: string; configuration: string; differs: boolean } | undefined {
   const found = Object.entries(settings)
-    .map(([configuration, values]) => ({ configuration, value: values[key] }))
+    .map(([configuration, values]) => ({
+      configuration,
+      value: values[key] === undefined ? undefined : expandSettingRefs(values[key], values),
+    }))
     .filter((entry): entry is { configuration: string; value: string } => Boolean(entry.value));
   if (found.length === 0) return undefined;
   const chosen = preferred.map((name) => found.find((e) => e.configuration === name)).find(Boolean);
