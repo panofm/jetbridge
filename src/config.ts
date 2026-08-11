@@ -37,13 +37,37 @@ const relativePath = z
   .refine((p) => !p.startsWith('/'), 'must be relative to the project root')
   .refine((p) => !p.split('/').includes('..'), 'must not escape the project root');
 
-const entitlementPair = z.object({
-  /** The Xcode target this pair belongs to — one app, plus any extensions. */
-  target: z.string().min(1),
+/**
+ * An Xcode target that gets its own bundle id — the app, plus any extension
+ * that ships inside it. An extension's id is the app's id plus its own segment,
+ * which is why a variant has to register more than one.
+ */
+const targetSchema = z.object({
+  /** Xcode target name, as the project spells it. */
+  name: z.string().min(1),
+  /**
+   * Appended to the app's variant bundle id. Omit for the app itself; an
+   * extension named `uploadwidget` becomes `<base>.<slug>.uploadwidget`.
+   */
+  bundleIdSuffix: z
+    .string()
+    .regex(/^[a-z0-9]+$/, 'lowercase alphanumerics — it is one bundle-id segment')
+    .optional(),
   /** Shipping entitlements, used by a plain build. */
-  base: relativePath,
-  /** Reduced entitlements for a variant bundle id. */
-  variant: relativePath,
+  entitlements: relativePath.optional(),
+  /**
+   * Reduced entitlements for a variant. Capabilities the public API cannot
+   * grant (app groups, Sign in with Apple) have to be dropped here, or signing
+   * fails against a profile that does not carry them.
+   */
+  variantEntitlements: relativePath.optional(),
+  /**
+   * Capabilities to enable on the registered bundle id, e.g.
+   * `PUSH_NOTIFICATIONS`. Only what the public API can actually deliver.
+   */
+  capabilities: z
+    .array(z.string().regex(/^[A-Z0-9_]+$/, 'an App Store Connect capability type'))
+    .default([]),
 });
 
 const projectSchema = z.object({
@@ -92,7 +116,10 @@ const variantSchema = z.object({
    * does not produce a name that stutters.
    */
   noiseWords: z.array(z.string().min(1)).optional(),
-  entitlements: z.array(entitlementPair).default([]),
+  /** Every target that needs its own registered bundle id. */
+  targets: z.array(targetSchema).default([]),
+  /** Name given to generated provisioning profiles. Defaults to the label prefix. */
+  profilePrefix: z.string().min(1).optional(),
 });
 
 const xcconfigOverrideSchema = z.object({
@@ -208,12 +235,36 @@ export const configSchema = z
         message: 'set project.xcodeproj or project.xcworkspace',
       });
     }
+    // Exactly one target is the app itself. Two would both claim the app's
+    // bundle id and silently overwrite each other's profile.
+    const appTargets = config.variant.targets.filter((t) => !t.bundleIdSuffix);
+    if (config.variant.targets.length > 0 && appTargets.length !== 1) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['variant', 'targets'],
+        message:
+          appTargets.length === 0
+            ? 'one target must be the app itself — leave its bundleIdSuffix unset'
+            : `only one target can be the app itself; ${appTargets
+                .map((t) => t.name)
+                .join(' and ')} both leave bundleIdSuffix unset`,
+      });
+    }
+    const suffixes = config.variant.targets.map((t) => t.bundleIdSuffix ?? '');
+    const duplicate = suffixes.find((s, i) => suffixes.indexOf(s) !== i);
+    if (duplicate !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['variant', 'targets'],
+        message: `two targets share the bundleIdSuffix "${duplicate}"`,
+      });
+    }
   });
 
 export type Config = z.infer<typeof configSchema>;
 export type ProjectConfig = Config['project'];
 export type OtaConfig = NonNullable<Config['ota']>;
-export type EntitlementPair = z.infer<typeof entitlementPair>;
+export type TargetConfig = z.infer<typeof targetSchema>;
 
 /**
  * The noise words actually used: whatever was configured, or the default —

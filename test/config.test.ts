@@ -40,7 +40,7 @@ describe('defaults', () => {
       archive: 'Release',
     });
     expect(result.config.variant.labelBudget).toBe(14);
-    expect(result.config.variant.entitlements).toEqual([]);
+    expect(result.config.variant.targets).toEqual([]);
     expect(result.config.credentials.ascKeyId).toBe('ASC_API_KEY_ID');
     expect(result.config.git.defaultBranch).toBe('main');
     expect(result.config.git.requireCleanDefaultBranch).toBe(false);
@@ -171,6 +171,80 @@ describe('rejections', () => {
       variant: {},
     });
     expect(errors.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('variant targets', () => {
+  const withTargets = (targets: unknown[]) =>
+    parseConfig({ ...minimal, variant: { displayName: 'Acme Dev', targets } });
+
+  it('accepts an app plus an extension', () => {
+    const result = withTargets([
+      { name: 'Acme', capabilities: ['PUSH_NOTIFICATIONS'] },
+      { name: 'Widget', bundleIdSuffix: 'uploadwidget' },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it('defaults a target to no capabilities', () => {
+    const result = withTargets([{ name: 'Acme' }]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.variant.targets[0]!.capabilities).toEqual([]);
+  });
+
+  it('requires exactly one target to be the app itself', () => {
+    expect(
+      errorsFor({
+        ...minimal,
+        variant: { displayName: 'A', targets: [{ name: 'X', bundleIdSuffix: 'x' }] },
+      }),
+    ).toContainEqual(expect.stringContaining('one target must be the app itself'));
+  });
+
+  it('refuses two targets that both claim the app bundle id', () => {
+    expect(
+      errorsFor({
+        ...minimal,
+        variant: { displayName: 'A', targets: [{ name: 'One' }, { name: 'Two' }] },
+      }),
+    ).toContainEqual(expect.stringContaining('only one target can be the app itself'));
+  });
+
+  it('refuses two extensions with the same bundle-id segment', () => {
+    expect(
+      errorsFor({
+        ...minimal,
+        variant: {
+          displayName: 'A',
+          targets: [
+            { name: 'App' },
+            { name: 'One', bundleIdSuffix: 'widget' },
+            { name: 'Two', bundleIdSuffix: 'widget' },
+          ],
+        },
+      }),
+    ).toContainEqual(expect.stringContaining('share the bundleIdSuffix "widget"'));
+  });
+
+  it('refuses a bundle-id segment that is not one segment', () => {
+    for (const bundleIdSuffix of ['Widget', 'up.load', 'up-load']) {
+      expect(
+        errorsFor({
+          ...minimal,
+          variant: { displayName: 'A', targets: [{ name: 'App' }, { name: 'X', bundleIdSuffix }] },
+        }),
+      ).toContainEqual(expect.stringContaining('one bundle-id segment'));
+    }
+  });
+
+  it('refuses a capability that is not an App Store Connect type', () => {
+    expect(
+      errorsFor({
+        ...minimal,
+        variant: { displayName: 'A', targets: [{ name: 'App', capabilities: ['push'] }] },
+      }),
+    ).toContainEqual(expect.stringContaining('capability type'));
   });
 });
 
