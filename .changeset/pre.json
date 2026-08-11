@@ -4,5 +4,5 @@
   "initialVersions": {
     "jetbridge": "0.0.0"
   },
-  "changesets": ["cold-pandas-argue"]
+  "changesets": ["cold-pandas-argue", "paginate-listings"]
 }
