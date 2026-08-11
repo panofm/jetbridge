@@ -216,6 +216,8 @@ The fix is a second file with those entitlements removed, used only for a varian
 
 Only the reduced file is declared. The shipping one is whatever `CODE_SIGN_ENTITLEMENTS` already says for that target, so there is no second copy to keep in step.
 
+`jetbridge init` fills this in for you when it finds the reduced file beside the shipping one — as a sibling, or in a `config/` directory next to it — and asks otherwise. A target that sets its entitlements in an `.xcconfig` rather than in the project is not detected, so write `variantEntitlements` by hand for it.
+
 **Watch the base this path is relative to.** Like every path in the config, it is relative to the **project root** — the directory holding `jetbridge.config.json`. `CODE_SIGN_ENTITLEMENTS` inside the project is relative to the **Xcode project directory**, which is one level down. In practice the two files are siblings, so take the shipping path and put `iosDir` on the front:
 
 | `CODE_SIGN_ENTITLEMENTS` says | `variantEntitlements` wants          |

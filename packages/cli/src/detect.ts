@@ -13,7 +13,7 @@
  * them saying different things. Anything unparseable degrades to a partial
  * result with a warning — a strange project must still reach the questions.
  */
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { Boundary } from './boundary.js';
 import { projectSpecName, xcodeprojNames } from './project-layout.js';
 
@@ -32,6 +32,8 @@ export interface DetectedTarget {
   /** One bundle-id segment for an extension; unset for the app itself. */
   bundleIdSuffix?: string;
   entitlements?: Suggestion<string>;
+  /** A reduced entitlements file found beside the shipping one. */
+  variantEntitlements?: Suggestion<string>;
 }
 
 export interface Detection {
@@ -357,6 +359,23 @@ export function bundleIdSuffixFrom(value: string): string | undefined {
   return squeezed.length > 0 ? squeezed : undefined;
 }
 
+/**
+ * Where a target's reduced entitlements file would be, given the shipping one.
+ *
+ * The one thing about a variant build that no Xcode project can state — it
+ * describes what ships, and a variant deliberately signs against less. Two
+ * spellings occur in real projects: the file beside the shipping one
+ * (`Acme/Acme-variant.entitlements`), and the same name in a `config/`
+ * directory next to it. Both are offered, and the caller keeps whichever exist.
+ */
+export function variantEntitlementsCandidates(shipping: string): string[] {
+  const base = basename(shipping);
+  const dot = base.lastIndexOf('.');
+  const name = dot === -1 ? `${base}-variant` : `${base.slice(0, dot)}-variant${base.slice(dot)}`;
+  const directory = dirname(shipping);
+  return [join(directory, name), join(directory, 'config', name)];
+}
+
 export interface DetectOptions {
   /** Where the config file will live. Every suggested path is relative to it. */
   root: string;
@@ -551,6 +570,21 @@ export function detectProject(boundary: Boundary, options: DetectOptions): Detec
       );
     }
 
+    // Only ONE candidate is a default. Two files that both look like the
+    // variant entitlements is a question, not a guess: picking one silently
+    // signs the variant against entitlements nobody chose.
+    const variants = relativeEntitlements
+      ? variantEntitlementsCandidates(relativeEntitlements).filter((candidate) =>
+          boundary.fs.exists(resolve(root, candidate)),
+        )
+      : [];
+    if (variants.length > 1) {
+      warnings.push(
+        `${target.name} has more than one file that could be its variant entitlements ` +
+          `(${variants.join(', ')}) — pick one by hand.`,
+      );
+    }
+
     // An extension without a usable id segment would read as a second app
     // target, which the schema refuses. Leave it out and say so.
     const suffix = isApp
@@ -571,6 +605,9 @@ export function detectProject(boundary: Boundary, options: DetectOptions): Detec
       ...(suffix ? { bundleIdSuffix: suffix } : {}),
       ...(relativeEntitlements
         ? { entitlements: { value: relativeEntitlements, source: pbxSource } }
+        : {}),
+      ...(variants.length === 1
+        ? { variantEntitlements: { value: variants[0]!, source: variants[0]! } }
         : {}),
     });
   }

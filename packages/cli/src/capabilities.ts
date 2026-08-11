@@ -40,6 +40,38 @@ export const CAPABILITY_BY_ENTITLEMENT: ReadonlyArray<readonly [string, string]>
 ];
 
 /**
+ * The capabilities the public App Store Connect API cannot turn on for a
+ * freshly registered bundle id, because each one needs a related identifier
+ * that only a person with the developer account can attach — an app group, or
+ * the primary app id a Sign in with Apple grouping hangs off.
+ *
+ * They are exactly the reason `variantEntitlements` exists: a variant that
+ * keeps them signs against a profile that does not carry them, and the build
+ * fails at signing. Kept deliberately short — a capability wrongly named here
+ * warns about a variant that would have provisioned fine.
+ */
+export const UNGRANTABLE_CAPABILITIES: readonly string[] = ['APP_GROUPS', 'APPLE_ID_AUTH'];
+
+/**
+ * The capabilities an entitlements file declares, or null when it is missing or
+ * is not a property list. Never throws: the wizard reads a project it has not
+ * validated, and a strange file there is a warning, not the end of the run.
+ */
+export function capabilitiesInEntitlements(boundary: Boundary, path: string): string[] | null {
+  if (!boundary.fs.exists(path)) return null;
+  let entitlements: Record<string, unknown> | null;
+  try {
+    entitlements = readPlistFile(boundary, path);
+  } catch {
+    return null;
+  }
+  if (!entitlements) return null;
+  return CAPABILITY_BY_ENTITLEMENT.filter(([key]) => key in entitlements).map(
+    ([, capability]) => capability,
+  );
+}
+
+/**
  * The entitlements a VARIANT signs against, which is the file that decides what
  * to ask Apple for. A variant deliberately drops what the public API cannot
  * grant, so deriving from the shipping file would request capabilities Apple
@@ -68,11 +100,9 @@ export function capabilitiesFor(
   if (!relative) return [];
   const path = project.path(relative);
   if (!boundary.fs.exists(path)) return [];
-  const entitlements = readPlistFile(boundary, path);
-  if (!entitlements) {
+  const capabilities = capabilitiesInEntitlements(boundary, path);
+  if (!capabilities) {
     fail(`could not read ${target.name}'s entitlements at ${path} — it is not a property list`);
   }
-  return CAPABILITY_BY_ENTITLEMENT.filter(([key]) => key in entitlements).map(
-    ([, capability]) => capability,
-  );
+  return capabilities;
 }

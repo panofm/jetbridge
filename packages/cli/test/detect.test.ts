@@ -286,6 +286,44 @@ describe('detectProject', () => {
     ]);
   });
 
+  it('finds a reduced entitlements file beside the shipping one', () => {
+    const detection = detectProject(
+      boundaryWith({
+        ...projectFiles(),
+        '/repo/ios/Acme/Acme-variant.entitlements': '<plist/>',
+        '/repo/ios/Upload Widget/config/UploadWidget-variant.entitlements': '<plist/>',
+      }),
+      { root: '/repo' },
+    );
+    // Both spellings occur in real projects, and each target may use either.
+    expect(detection.targets[0]!.variantEntitlements).toEqual({
+      value: 'ios/Acme/Acme-variant.entitlements',
+      source: 'ios/Acme/Acme-variant.entitlements',
+    });
+    expect(detection.targets[1]!.variantEntitlements).toEqual({
+      value: 'ios/Upload Widget/config/UploadWidget-variant.entitlements',
+      source: 'ios/Upload Widget/config/UploadWidget-variant.entitlements',
+    });
+  });
+
+  it('suggests nothing, and says why, when two files could both be it', () => {
+    const detection = detectProject(
+      boundaryWith({
+        ...projectFiles(),
+        '/repo/ios/Acme/Acme-variant.entitlements': '<plist/>',
+        '/repo/ios/Acme/config/Acme-variant.entitlements': '<plist/>',
+      }),
+      { root: '/repo' },
+    );
+    expect(detection.targets[0]!.variantEntitlements).toBeUndefined();
+    expect(detection.warnings.join(' ')).toMatch(/more than one file that could be its variant/);
+  });
+
+  it('suggests nothing when there is no reduced file to find', () => {
+    const detection = detectProject(boundaryWith(projectFiles()), { root: '/repo' });
+    expect(detection.targets[0]!.variantEntitlements).toBeUndefined();
+  });
+
   it('leaves out an entitlements path that escapes the project root', () => {
     const detection = detectProject(
       boundaryWith({

@@ -303,6 +303,76 @@ export function labelPrefixFor(config: Config): string {
   return config.variant.labelPrefix ?? config.variant.displayName.split(/\s+/)[0]!;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Defaults                                                                   */
+/* -------------------------------------------------------------------------- */
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * A config carrying nothing but the fields the schema cannot supply itself.
+ * Every other key in the parse of it is, by construction, a default.
+ */
+const DEFAULT_PROBE: Record<string, unknown> = {
+  configVersion: CONFIG_VERSION,
+  project: { scheme: 'scheme', teamId: 'AAAAAAAAAA', baseBundleId: 'example.app' },
+  variant: { displayName: 'App' },
+  ota: { storage: { bucket: 'bucket', publicBaseUrl: 'https://example.com' } },
+};
+
+/** Whatever the parse added that the input did not carry. */
+function addedByParse(input: unknown, output: unknown): unknown {
+  if (!isPlainObject(input) || !isPlainObject(output)) return output;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(output)) {
+    if (!(key in input)) {
+      out[key] = value;
+      continue;
+    }
+    const nested = addedByParse(input[key], value);
+    if (isPlainObject(nested) && Object.keys(nested).length > 0) out[key] = nested;
+  }
+  return out;
+}
+
+/** Every value the schema fills in on its own, as one nested object. */
+export function schemaDefaults(): Record<string, unknown> {
+  return addedByParse(DEFAULT_PROBE, configSchema.parse(DEFAULT_PROBE)) as Record<string, unknown>;
+}
+
+/**
+ * The same config with everything the schema would have supplied anyway taken
+ * out — so a written file holds DECISIONS, not a second copy of the schema.
+ *
+ * Compared against the defaults themselves, never against an empty object: a
+ * config that has been through `parseConfig` carries every default explicitly,
+ * and comparing structurally would keep all of them.
+ */
+export function omitDefaults(
+  raw: Record<string, unknown>,
+  defaults: Record<string, unknown> = schemaDefaults(),
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const fallback = defaults[key];
+    if (fallback === undefined) {
+      out[key] = value;
+      continue;
+    }
+    if (isPlainObject(value) && isPlainObject(fallback)) {
+      const pruned = omitDefaults(value, fallback);
+      if (Object.keys(pruned).length > 0) out[key] = pruned;
+      continue;
+    }
+    // Order matters inside an array — `deviceTypes` is a list of choices — so
+    // it is compared as written rather than as a set.
+    if (JSON.stringify(value) === JSON.stringify(fallback)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 export interface ConfigError {
   path: string;
   message: string;

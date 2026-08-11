@@ -15,15 +15,17 @@
 import { join, resolve } from 'node:path';
 import { localCredentials, missingCredentialsMessage } from './asc.js';
 import type { Boundary } from './boundary.js';
+import { capabilitiesInEntitlements, UNGRANTABLE_CAPABILITIES } from './capabilities.js';
 import {
   CONFIG_FILENAMES,
   CONFIG_VERSION,
   envRefName,
   formatConfigErrors,
+  omitDefaults,
   parseConfig,
   type Config,
 } from './config.js';
-import { detectProject, type Detection, type Suggestion } from './detect.js';
+import { detectProject, type DetectedTarget, type Detection, type Suggestion } from './detect.js';
 import { fail, projectAt, type Project } from './project.js';
 import { xcodeprojNames } from './project-layout.js';
 import type { Prompter } from './prompts.js';
@@ -39,6 +41,8 @@ const DEFAULT_CONFIGURATIONS = ['Debug', 'Release'];
 
 export interface TargetInput {
   name: string;
+  /** Root-relative path of the reduced entitlements a variant signs against. */
+  variantEntitlements?: string;
 }
 
 export interface ConfigInput {
@@ -70,9 +74,13 @@ export type OtaAccess = (typeof OTA_ACCESS_MODES)[number];
  * The config as an ordinary object, in schema order. Key order is the literal's
  * order, so the written file reads top-down the way the schema is documented
  * rather than the way the wizard happened to ask.
+ *
+ * Anything equal to what the schema supplies anyway is then taken back out. A
+ * generated file that restates the defaults reads as a list of decisions nobody
+ * made, and it pins values the schema is free to improve.
  */
 export function assembleConfig(input: ConfigInput): Record<string, unknown> {
-  return {
+  return omitDefaults({
     $schema: SCHEMA_URL,
     configVersion: CONFIG_VERSION,
     project: {
@@ -91,7 +99,10 @@ export function assembleConfig(input: ConfigInput): Record<string, unknown> {
     },
     variant: {
       displayName: input.displayName,
-      targets: input.targets.map((target) => ({ name: target.name })),
+      targets: input.targets.map((target) => ({
+        name: target.name,
+        ...(target.variantEntitlements ? { variantEntitlements: target.variantEntitlements } : {}),
+      })),
     },
     // The wizard asks for a plain name, because typing `${…}` at a prompt is
     // unpleasant. The FILE always carries the reference form, so a reader can
@@ -113,7 +124,7 @@ export function assembleConfig(input: ConfigInput): Record<string, unknown> {
           },
         }
       : {}),
-  };
+  });
 }
 
 /** `ASC_API_KEY_ID` → `${ASC_API_KEY_ID}`, the only form the config accepts. */
@@ -126,40 +137,28 @@ export const serializeConfig = (value: unknown): string => `${JSON.stringify(val
 /* -------------------------------------------------------------------------- */
 
 export interface CommandPreview {
-  mode: 'wired' | 'sim' | 'archive';
+  /** What a machine reader keys off; the command text is for a person. */
+  mode: 'simulator' | 'device' | 'share';
+  /** The literal command, with no padding — alignment belongs to the printer. */
   command: string;
+  /** The build configuration this command's answers pointed it at. */
+  configuration: string;
 }
 
-const quote = (value: string): string => (/[\s]/.test(value) ? `'${value}'` : value);
-
 /**
- * What each mode will run, as the config determines it. Signing flags and the
- * build number are decided at run time and left out — the point of the preview
- * is the scheme, the configuration and the destination, which are exactly what
- * the answers just chose.
+ * What to run next, and which build configuration the answers just pointed it
+ * at.
+ *
+ * The xcodebuild command line each mode produces was here before. Nobody types
+ * those — they are internals, carrying absolute paths — and printing them at
+ * the end of setup answered a question nobody asked.
  */
 export function commandPreviews(project: Project): CommandPreview[] {
-  const { config } = project;
-  const target = project.xcodebuildTarget().map(quote).join(' ');
-  const line = (verb: string, configuration: string, destination: string): string =>
-    [
-      'xcodebuild',
-      verb,
-      target,
-      '-scheme',
-      quote(config.project.scheme),
-      '-configuration',
-      quote(configuration),
-      '-destination',
-      quote(destination),
-    ].join(' ');
+  const { configurations } = project.config;
   return [
-    { mode: 'wired', command: line('build', config.configurations.wired, 'generic/platform=iOS') },
-    { mode: 'sim', command: line('build', config.configurations.sim, 'platform=iOS Simulator') },
-    {
-      mode: 'archive',
-      command: line('archive', config.configurations.archive, 'generic/platform=iOS'),
-    },
+    { mode: 'simulator', command: 'jetbridge install', configuration: configurations.sim },
+    { mode: 'device', command: 'jetbridge install --device', configuration: configurations.wired },
+    { mode: 'share', command: 'jetbridge link', configuration: configurations.archive },
   ];
 }
 
@@ -548,6 +547,15 @@ async function create(
     if (problem) fail(`${flag} ${name}: ${problem}`);
   }
 
+  // The one thing the project cannot state. Asked only of a target that HAS
+  // entitlements — nothing to reduce means nothing to answer — and left empty
+  // is a real answer: an app with no special capabilities needs no such file.
+  const targets: TargetInput[] = [];
+  for (const target of detection.targets) {
+    const chosen = await askVariantEntitlements(prompts, target, auto);
+    targets.push({ name: target.name, ...(chosen ? { variantEntitlements: chosen } : {}) });
+  }
+
   let xcodegen = false;
   if (detection.projectYml) {
     xcodegen = auto
@@ -648,14 +656,73 @@ async function create(
     xcodegen,
     configurations: { wired, sim, archive },
     displayName,
-    targets: detection.targets.map((target) => ({
-      name: target.name,
-    })),
+    targets,
     credentials: { ascKeyId, ascIssuerId },
     ...(ota ? { ota } : {}),
   });
 
-  return finish(boundary, deps, configPath, raw, auto, options, []);
+  const result = await finish(boundary, deps, configPath, raw, auto, options, []);
+  if (result.status === 'written') warnAboutSigningCapabilities(boundary, detection, targets);
+  return result;
+}
+
+/**
+ * The question the project cannot answer for itself: which file a variant build
+ * signs against.
+ */
+async function askVariantEntitlements(
+  prompts: Prompter,
+  target: DetectedTarget,
+  auto: boolean,
+): Promise<string | undefined> {
+  if (!target.entitlements) return undefined;
+  if (auto) return target.variantEntitlements?.value;
+  const answer = await prompts.text({
+    name: `variant.targets.${target.name}.variantEntitlements`,
+    message:
+      `Reduced entitlements for ${target.name} — the file a variant signs against, without the ` +
+      'capabilities Apple cannot grant a new bundle id; leave empty if it needs none',
+    ...(target.variantEntitlements
+      ? {
+          initial: target.variantEntitlements.value,
+          hint: `from ${target.variantEntitlements.source}`,
+        }
+      : {}),
+  });
+  return answer.trim() || undefined;
+}
+
+/**
+ * The build that would fail at signing, said out loud while somebody is still
+ * reading.
+ *
+ * A target that keeps app groups or Sign in with Apple in the entitlements a
+ * variant signs against asks the public API for a capability it cannot grant,
+ * and the failure lands twenty minutes later inside Xcode, blaming a profile.
+ */
+function warnAboutSigningCapabilities(
+  boundary: Boundary,
+  detection: Detection,
+  targets: TargetInput[],
+): void {
+  const declared = new Map(targets.map((target) => [target.name, target.variantEntitlements]));
+  for (const target of detection.targets) {
+    if (!target.entitlements || declared.get(target.name)) continue;
+    const capabilities = capabilitiesInEntitlements(
+      boundary,
+      resolve(detection.root, target.entitlements.value),
+    );
+    const blocking = (capabilities ?? []).filter((capability) =>
+      UNGRANTABLE_CAPABILITIES.includes(capability),
+    );
+    if (blocking.length === 0) continue;
+    boundary.log.warn(
+      `! ${target.name} declares ${blocking.join(' and ')} in ${target.entitlements.value}, and ` +
+        'the App Store Connect API cannot grant those to a variant bundle id — a variant build ' +
+        'will fail at signing until variant.targets carries a variantEntitlements file that ' +
+        'drops them.',
+    );
+  }
 }
 
 const KEEP_OTA = { name: 'ota.continue', message: 'Keep these OTA settings anyway?' };
@@ -747,8 +814,12 @@ async function finish(
 
   const contents = serializeConfig(raw);
   deps.prompts.note(contents.trimEnd(), configPath);
-  for (const preview of commandPreviews(projectAt(boundary, configPath, checked.config))) {
-    boundary.log.info(`  ${preview.mode.padEnd(7)} ${preview.command}`);
+  // Padding is the printer's business: the previews carry literal commands, so
+  // a `--json` reader never sees trailing spaces baked into one.
+  const previews = commandPreviews(projectAt(boundary, configPath, checked.config));
+  const width = Math.max(...previews.map((preview) => preview.command.length));
+  for (const preview of previews) {
+    boundary.log.info(`  ${preview.command.padEnd(width + 2)}(${preview.configuration})`);
   }
 
   if (auto) {

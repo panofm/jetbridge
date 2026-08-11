@@ -32,7 +32,12 @@ import { testConfig } from './helpers/config.js';
 /* -------------------------------------------------------------------------- */
 
 /** Just enough pbxproj for the wizard to have something to detect. */
-function pbxproj(options: { configurations: string[]; bundleId: string }): string {
+function pbxproj(options: {
+  configurations: string[];
+  bundleId: string;
+  /** `CODE_SIGN_ENTITLEMENTS`, as the project spells it: relative to the ios dir. */
+  entitlements?: string;
+}): string {
   const projectConfig = (name: string, index: number) => `
 		P0${index} /* ${name} */ = {
 			isa = XCBuildConfiguration;
@@ -44,7 +49,11 @@ function pbxproj(options: { configurations: string[]; bundleId: string }): strin
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				INFOPLIST_KEY_CFBundleDisplayName = "Acme Dev";
-				PRODUCT_BUNDLE_IDENTIFIER = ${options.bundleId};
+				PRODUCT_BUNDLE_IDENTIFIER = ${options.bundleId};${
+          options.entitlements
+            ? `\n\t\t\t\tCODE_SIGN_ENTITLEMENTS = "${options.entitlements}";`
+            : ''
+        }
 			};
 			name = ${name};
 		};`;
@@ -79,11 +88,12 @@ function pbxproj(options: { configurations: string[]; bundleId: string }): strin
 }
 
 const projectFiles = (
-  options: { configurations?: string[]; bundleId?: string } = {},
+  options: { configurations?: string[]; bundleId?: string; entitlements?: string } = {},
 ): Record<string, string> => ({
   '/repo/ios/Acme.xcodeproj/project.pbxproj': pbxproj({
     configurations: options.configurations ?? ['Debug', 'Release'],
     bundleId: options.bundleId ?? 'io.acme.app.dev',
+    ...(options.entitlements ? { entitlements: options.entitlements } : {}),
   }),
   '/repo/ios/Acme.xcodeproj/xcshareddata/xcschemes/Acme.xcscheme': '<Scheme/>',
 });
@@ -175,40 +185,79 @@ describe('assembleConfig', () => {
 
   it('writes the keys in schema order, with a trailing newline', () => {
     const text = serializeConfig(assembleConfig(input));
+    // `configurations` and `credentials` are absent because every value in them
+    // is what the schema says anyway — see "restates no default" below.
     expect(Object.keys(assembleConfig(input))).toEqual([
       '$schema',
       'configVersion',
       'project',
-      'configurations',
       'variant',
-      'credentials',
     ]);
     expect(text.endsWith('}\n')).toBe(true);
+  });
+
+  describe('restates no default', () => {
+    it('leaves out a section that only repeats the schema', () => {
+      const raw = assembleConfig(input);
+      expect(raw.credentials).toBeUndefined();
+      expect(raw.configurations).toBeUndefined();
+      expect(serializeConfig(raw)).not.toContain('ASC_API_KEY_ID');
+    });
+
+    it('keeps a value that differs from the default', () => {
+      const raw = assembleConfig({
+        ...input,
+        configurations: { wired: 'Debug', sim: 'Debug', archive: 'Staging' },
+        credentials: { ascKeyId: 'CI_KEY', ascIssuerId: 'ASC_API_ISSUER_ID' },
+      });
+      // Only the fields that decided something survive their section.
+      expect(raw.configurations).toEqual({ archive: 'Staging' });
+      expect(raw.credentials).toEqual({ ascKeyId: '${CI_KEY}' });
+    });
+
+    it('means the same config after the schema fills the defaults back in', () => {
+      // The assertion that matters: pruning may not change what the tool reads.
+      const pruned = parseConfig(assembleConfig(input));
+      const full = parseConfig({
+        ...assembleConfig(input),
+        configurations: { wired: 'Debug', sim: 'Debug', archive: 'Release' },
+        credentials: { ascKeyId: '${ASC_API_KEY_ID}', ascIssuerId: '${ASC_API_ISSUER_ID}' },
+      });
+      expect(pruned.ok && full.ok).toBe(true);
+      expect(pruned.ok && pruned.config).toEqual(full.ok && full.config);
+    });
   });
 });
 
 describe('commandPreviews', () => {
-  it('shows the scheme, configuration and destination each mode will use', () => {
+  it('shows the commands a person runs next, and the configuration each uses', () => {
+    // Not the xcodebuild line each mode produces: nobody types those, they
+    // carry absolute paths, and they answer a question nobody asked.
     const project = projectFrom('/repo/jetbridge.config.json', testConfig());
     expect(commandPreviews(project)).toEqual([
-      {
-        mode: 'wired',
-        command:
-          'xcodebuild build -project /repo/ios/Acme.xcodeproj -scheme Acme -configuration Debug ' +
-          '-destination generic/platform=iOS',
-      },
-      {
-        mode: 'sim',
-        command:
-          'xcodebuild build -project /repo/ios/Acme.xcodeproj -scheme Acme -configuration Debug ' +
-          "-destination 'platform=iOS Simulator'",
-      },
-      {
-        mode: 'archive',
-        command:
-          'xcodebuild archive -project /repo/ios/Acme.xcodeproj -scheme Acme -configuration ' +
-          'Release -destination generic/platform=iOS',
-      },
+      { mode: 'simulator', command: 'jetbridge install', configuration: 'Debug' },
+      { mode: 'device', command: 'jetbridge install --device', configuration: 'Debug' },
+      { mode: 'share', command: 'jetbridge link', configuration: 'Release' },
+    ]);
+  });
+
+  it('carries the literal command, so a reader gets no padding baked in', () => {
+    const project = projectFrom('/repo/jetbridge.config.json', testConfig());
+    for (const preview of commandPreviews(project)) {
+      expect(preview.command).toBe(preview.command.trim());
+      expect(preview.command).not.toContain('(');
+    }
+  });
+
+  it('names the configuration the answers actually chose', () => {
+    const project = projectFrom(
+      '/repo/jetbridge.config.json',
+      testConfig({ configurations: { wired: 'Dev', sim: 'Dev', archive: 'Staging' } }),
+    );
+    expect(commandPreviews(project).map((preview) => preview.configuration)).toEqual([
+      'Dev',
+      'Dev',
+      'Staging',
     ]);
   });
 });
@@ -242,10 +291,12 @@ describe('the interactive flow', () => {
 
   it('does not ask about a build configuration it can infer', async () => {
     const h = harness();
-    const { prompts } = await run(h, fullAnswers);
+    const { prompts, result } = await run(h, fullAnswers);
     expect(prompts.asked).not.toContain('configurations.wired');
-    // The list of configurations is NOT written — it is the project's to state.
-    expect(JSON.parse(written(h.boundary)).configurations).toEqual({
+    // Neither the list of configurations nor the three the schema would have
+    // chosen anyway is written — the file holds decisions, not restatements.
+    expect(JSON.parse(written(h.boundary)).configurations).toBeUndefined();
+    expect(result.config?.configurations).toEqual({
       wired: 'Debug',
       sim: 'Debug',
       archive: 'Release',
@@ -293,21 +344,188 @@ describe('the interactive flow', () => {
     const h = harness();
     const { prompts } = await run(h, fullAnswers);
     expect(prompts.notes.join('\n')).toContain('"configVersion": 1');
-    expect(h.logs.join('\n')).toContain('-destination generic/platform=iOS');
+    // The printer is what pads them into a column, not the preview itself.
+    expect(h.logs).toContain('  jetbridge install           (Debug)');
+    expect(h.logs).toContain('  jetbridge install --device  (Debug)');
+    expect(h.logs).toContain('  jetbridge link              (Release)');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+describe('variant entitlements', () => {
+  /** An app with the two capabilities the public API cannot grant a new id. */
+  const SHIPPING = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+	<key>aps-environment</key>
+	<string>development</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.io.acme.app</string>
+	</array>
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+</dict>
+</plist>
+`;
+
+  /** Push only: nothing here needs a reduced file. */
+  const PLAIN = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>
+`;
+
+  const question = 'variant.targets.Acme.variantEntitlements';
+
+  /** A project whose app points at `Acme/Acme.entitlements`, plus extra files. */
+  const withEntitlements = (files: Record<string, string> = {}): InitHarness =>
+    harness({
+      files: {
+        ...projectFiles({ entitlements: 'Acme/Acme.entitlements' }),
+        '/repo/ios/Acme/Acme.entitlements': SHIPPING,
+        ...files,
+      },
+    });
+
+  const targetsIn = (boundary: FakeBoundary): unknown =>
+    JSON.parse(written(boundary)).variant.targets;
+
+  it('offers the reduced file sitting beside the shipping one', async () => {
+    const h = withEntitlements({ '/repo/ios/Acme/Acme-variant.entitlements': PLAIN });
+    const asked: Array<string | undefined> = [];
+    const base = scriptedPrompter({
+      ...fullAnswers,
+      [question]: 'ios/Acme/Acme-variant.entitlements',
+    });
+    const result = await runInit(
+      h.boundary,
+      {},
+      {
+        prompts: {
+          ...base,
+          text: async (q) => {
+            if (q.name === question) asked.push(`${q.initial}:${q.hint}`);
+            return base.text(q);
+          },
+        },
+      },
+    );
+    expect(asked).toEqual([
+      'ios/Acme/Acme-variant.entitlements:from ios/Acme/Acme-variant.entitlements',
+    ]);
+    expect(result.config?.variant.targets).toEqual([
+      { name: 'Acme', variantEntitlements: 'ios/Acme/Acme-variant.entitlements' },
+    ]);
+    expect(targetsIn(h.boundary)).toEqual([
+      { name: 'Acme', variantEntitlements: 'ios/Acme/Acme-variant.entitlements' },
+    ]);
+  });
+
+  it('finds it in the config directory beside the shipping file too', async () => {
+    const h = withEntitlements({ '/repo/ios/Acme/config/Acme-variant.entitlements': PLAIN });
+    const { result } = await run(h, {}, { yes: true });
+    expect(result.config?.variant.targets).toEqual([
+      { name: 'Acme', variantEntitlements: 'ios/Acme/config/Acme-variant.entitlements' },
+    ]);
+  });
+
+  it('asks, explaining what the file is and that it can be left empty', async () => {
+    const h = withEntitlements();
+    const messages: string[] = [];
+    const base = scriptedPrompter({ ...fullAnswers, [question]: '' });
+    await runInit(
+      h.boundary,
+      {},
+      {
+        prompts: {
+          ...base,
+          text: async (q) => {
+            if (q.name === question) messages.push(q.message);
+            return base.text(q);
+          },
+        },
+      },
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatch(/the file a variant signs against/);
+    expect(messages[0]).toMatch(/leave empty/);
+  });
+
+  it('omits the field entirely when the answer is left empty', async () => {
+    const h = withEntitlements();
+    const { result } = await run(h, { ...fullAnswers, [question]: '' });
+    expect(result.config?.variant.targets).toEqual([{ name: 'Acme' }]);
+    expect(targetsIn(h.boundary)).toEqual([{ name: 'Acme' }]);
+    expect(written(h.boundary)).not.toContain('variantEntitlements');
+  });
+
+  it('says which build will fail at signing when nothing reduces the capabilities', async () => {
+    const h = withEntitlements();
+    const { result } = await run(h, { ...fullAnswers, [question]: '' });
+    expect(result.status).toBe('written');
+    expect(h.logs.join('\n')).toContain(
+      'Acme declares APP_GROUPS and APPLE_ID_AUTH in ios/Acme/Acme.entitlements',
+    );
+    expect(h.logs.join('\n')).toContain('will fail at signing');
+  });
+
+  it('stays quiet when the variant file was taken', async () => {
+    const h = withEntitlements({ '/repo/ios/Acme/Acme-variant.entitlements': PLAIN });
+    await run(h, {}, { yes: true });
+    expect(h.logs.join('\n')).not.toContain('will fail at signing');
+  });
+
+  it('stays quiet when nothing in the entitlements needs granting by hand', async () => {
+    const h = harness({
+      files: {
+        ...projectFiles({ entitlements: 'Acme/Acme.entitlements' }),
+        '/repo/ios/Acme/Acme.entitlements': PLAIN,
+      },
+    });
+    await run(h, { ...fullAnswers, [question]: '' });
+    expect(h.logs.join('\n')).not.toContain('will fail at signing');
+  });
+
+  it('never asks about a target with no entitlements to reduce', async () => {
+    // The prompter throws on an unscripted question, so answering nothing here
+    // IS the assertion.
+    const h = harness();
+    const { result } = await run(h, fullAnswers);
+    expect(result.config?.variant.targets).toEqual([{ name: 'Acme' }]);
   });
 });
 
 describe('credentials', () => {
   it('writes references, never the values behind them', async () => {
-    const h = harness();
-    await run(h, fullAnswers);
+    const h = harness({ env: { CI_KEY: 'SENTINEL-KEY-ID-VALUE', CI_ISSUER: 'SENTINEL-ISSUER' } });
+    const { result } = await run(h, fullAnswers, {
+      ascKeyIdEnv: 'CI_KEY',
+      ascIssuerIdEnv: 'CI_ISSUER',
+    });
     const text = written(h.boundary);
     expect(JSON.parse(text).credentials).toEqual({
-      ascKeyId: '${ASC_API_KEY_ID}',
-      ascIssuerId: '${ASC_API_ISSUER_ID}',
+      ascKeyId: '${CI_KEY}',
+      ascIssuerId: '${CI_ISSUER}',
     });
+    expect(result.config?.credentials.ascKeyId).toBe('${CI_KEY}');
     expect(text).not.toContain('SENTINEL-KEY-ID-VALUE');
-    expect(text).not.toContain('SENTINEL-ISSUER-VALUE');
+    expect(text).not.toContain('SENTINEL-ISSUER');
+  });
+
+  it('writes no credentials section at all when the names are the usual ones', async () => {
+    const h = harness();
+    const { result } = await run(h, fullAnswers);
+    expect(JSON.parse(written(h.boundary)).credentials).toBeUndefined();
+    // The values still reach the tool — the schema supplies what the file omits.
+    expect(result.config?.credentials.ascKeyId).toBe('${ASC_API_KEY_ID}');
+    expect(result.config?.credentials.ascIssuerId).toBe('${ASC_API_ISSUER_ID}');
   });
 
   it('never asks about credential variable names', async () => {
@@ -436,7 +654,9 @@ describe('over-the-air delivery', () => {
     const { prompts, result } = await run(h, otaAnswers, {}, check);
     expect(prompts.asked).toContain('ota.access');
     expect(result.config?.ota?.access).toBe('path');
-    expect(JSON.parse(written(h.boundary)).ota.access).toBe('path');
+    // Asked, and answered with what the schema would have chosen — so the file
+    // says nothing, and the answer is still what the tool reads.
+    expect(JSON.parse(written(h.boundary)).ota.access).toBeUndefined();
   });
 
   it('takes the short-URL answer just as readily', async () => {
