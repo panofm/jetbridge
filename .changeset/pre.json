@@ -4,5 +4,8 @@
   "initialVersions": {
     "jetbridge": "0.0.0"
   },
-  "changesets": ["cold-pandas-argue", "renamed-command-surface"]
+  "changesets": [
+    "cold-pandas-argue",
+    "env-files"
+  ]
 }
