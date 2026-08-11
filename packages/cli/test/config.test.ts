@@ -1,0 +1,300 @@
+import { describe, expect, it } from 'vitest';
+import {
+  CONFIG_VERSION,
+  envRefName,
+  formatConfigErrors,
+  jsonSchema,
+  labelPrefixFor,
+  noiseWordsFor,
+  parseConfig,
+} from '../src/config.js';
+import { testConfig } from './helpers/config.js';
+
+const minimal = {
+  configVersion: CONFIG_VERSION,
+  project: {
+    xcodeproj: 'Acme.xcodeproj',
+    scheme: 'Acme',
+    teamId: 'ABCDE12345',
+    baseBundleId: 'io.acme.app.dev',
+  },
+  variant: { displayName: 'Acme Dev' },
+};
+
+const errorsFor = (value: unknown): string[] => {
+  const result = parseConfig(value);
+  if (result.ok) throw new Error('expected the config to be rejected');
+  return result.errors.map((e) => `${e.path}: ${e.message}`);
+};
+
+describe('defaults', () => {
+  it('fills every optional section', () => {
+    const result = parseConfig(minimal);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.project.iosDir).toBe('.');
+    expect(result.config.project.xcodegen).toBe(false);
+    expect(result.config.configurations).toEqual({
+      wired: 'Debug',
+      sim: 'Debug',
+      archive: 'Release',
+    });
+    expect(result.config.variant.labelBudget).toBe(14);
+    expect(result.config.variant.targets).toEqual([]);
+    expect(result.config.credentials.ascKeyId).toBe('${ASC_API_KEY_ID}');
+    expect(result.config.git.defaultBranch).toBe('main');
+    expect(result.config.git.requireCleanDefaultBranch).toBe(false);
+    expect(result.config.ota).toBeUndefined();
+  });
+
+  it('defaults the cabled build to a debuggable configuration', () => {
+    // The inner loop wants the debug affordances; an archive goes to other
+    // people and wants the optimised build.
+    const { config } = parseConfig(minimal) as { config: ReturnType<typeof testConfig> };
+    expect(config.configurations.wired).toBe('Debug');
+    expect(config.configurations.archive).toBe('Release');
+  });
+});
+
+describe('rejections', () => {
+  it('requires a config version', () => {
+    expect(errorsFor({ ...minimal, configVersion: undefined })).toContainEqual(
+      expect.stringContaining('configVersion'),
+    );
+  });
+
+  it('rejects a future config version', () => {
+    expect(errorsFor({ ...minimal, configVersion: 99 })).toContainEqual(
+      expect.stringContaining('configVersion'),
+    );
+  });
+
+  it('rejects a malformed team id', () => {
+    for (const teamId of ['abcde12345', 'TOOSHORT', 'ABCDE123456']) {
+      expect(errorsFor({ ...minimal, project: { ...minimal.project, teamId } })).toContainEqual(
+        expect.stringContaining('team id'),
+      );
+    }
+  });
+
+  it('rejects a bundle id that is not reverse-DNS', () => {
+    for (const baseBundleId of ['acme', 'io..acme', 'io.acme.']) {
+      expect(
+        errorsFor({ ...minimal, project: { ...minimal.project, baseBundleId } }),
+      ).toContainEqual(expect.stringContaining('reverse-DNS'));
+    }
+  });
+
+  it('takes any configuration name — the project is what says which exist', () => {
+    // Nothing here can know the project's configurations, and a second list in
+    // the config would go stale. `xcodeproject.ts` checks the name at build time.
+    const result = parseConfig({ ...minimal, configurations: { wired: 'Profile' } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.configurations.wired).toBe('Profile');
+  });
+
+  it('refuses an absolute path', () => {
+    expect(
+      errorsFor({ ...minimal, project: { ...minimal.project, iosDir: '/etc' } }),
+    ).toContainEqual(expect.stringContaining('relative to the project root'));
+  });
+
+  it('refuses a path that escapes the project root', () => {
+    expect(
+      errorsFor({ ...minimal, project: { ...minimal.project, iosDir: '../elsewhere' } }),
+    ).toContainEqual(expect.stringContaining('escape the project root'));
+  });
+
+  it('refuses an http OTA base URL, because iOS refuses to install from one', () => {
+    expect(
+      errorsFor({
+        ...minimal,
+        ota: { storage: { bucket: 'b', publicBaseUrl: 'http://builds.example.com' } },
+      }),
+    ).toContainEqual(expect.stringContaining('https://'));
+  });
+
+  it('accepts an https OTA base URL and fills the storage defaults', () => {
+    const result = parseConfig({
+      ...minimal,
+      ota: { storage: { bucket: 'b', publicBaseUrl: 'https://builds.example.com' } },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.ota?.storage.region).toBe('us-east-1');
+    expect(result.config.ota?.storage.prefix).toBe('builds');
+    expect(result.config.ota?.maxBuilds).toBe(60);
+    expect(result.config.ota?.access).toBe('path');
+    expect(result.config.ota?.exportMethod).toBe('development');
+  });
+
+  it('rejects an unknown export method', () => {
+    expect(
+      errorsFor({
+        ...minimal,
+        ota: {
+          storage: { bucket: 'b', publicBaseUrl: 'https://x.example.com' },
+          exportMethod: 'app-store',
+        },
+      }),
+    ).toContainEqual(expect.stringContaining('exportMethod'));
+  });
+
+  it('reports every problem at once rather than the first', () => {
+    const errors = errorsFor({
+      configVersion: CONFIG_VERSION,
+      project: { xcodeproj: 'A.xcodeproj', scheme: 'A', teamId: 'bad', baseBundleId: 'nope' },
+      variant: {},
+    });
+    expect(errors.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('variant targets', () => {
+  const withTargets = (targets: unknown[]) =>
+    parseConfig({ ...minimal, variant: { displayName: 'Acme Dev', targets } });
+
+  it('refuses two targets with the same name', () => {
+    expect(
+      errorsFor({
+        ...minimal,
+        variant: { displayName: 'A', targets: [{ name: 'App' }, { name: 'App' }] },
+      }),
+    ).toContainEqual(expect.stringContaining('share the name "App"'));
+  });
+
+  it('accepts an app plus an extension', () => {
+    const result = withTargets([
+      { name: 'Acme', entitlements: 'ios/Acme.entitlements' },
+      { name: 'Widget', bundleIdSuffix: 'uploadwidget' },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe('credentials never hold secrets', () => {
+  it('accepts a reference to an environment variable', () => {
+    const result = parseConfig({ ...minimal, credentials: { ascKeyId: '${MY_KEY_ID}' } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.credentials.ascKeyId).toBe('${MY_KEY_ID}');
+  });
+
+  it('rejects a bare name, and says which form it wants', () => {
+    // `"MY_KEY_ID"` reads as either a variable name or the secret itself, and
+    // this file is committed. Guessing between them is the whole problem.
+    expect(errorsFor({ ...minimal, credentials: { ascKeyId: 'MY_KEY_ID' } })).toContainEqual(
+      expect.stringContaining('must reference an environment variable as "${VAR}"'),
+    );
+  });
+
+  it('rejects a pasted secret, which is the failure this exists to prevent', () => {
+    for (const secret of [
+      'AKIAIOSFODNN7EXAMPLE',
+      'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+      '-----BEGIN PRIVATE KEY-----',
+    ]) {
+      expect(errorsFor({ ...minimal, credentials: { ascKeyId: secret } })).toContainEqual(
+        expect.stringContaining('never the value itself'),
+      );
+    }
+  });
+
+  it('rejects a reference that is not a usable variable name', () => {
+    for (const malformed of ['${}', '${MY KEY}', '${MY-KEY}', '$MY_KEY', '${MY_KEY', 'MY_KEY}']) {
+      expect(errorsFor({ ...minimal, credentials: { ascKeyId: malformed } })).toContainEqual(
+        expect.stringContaining('${VAR}'),
+      );
+    }
+  });
+
+  it('applies the same rule to the bucket credentials', () => {
+    expect(
+      errorsFor({
+        ...minimal,
+        ota: {
+          storage: {
+            bucket: 'acme-builds',
+            publicBaseUrl: 'https://builds.example.com',
+            accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+          },
+        },
+      }),
+    ).toContainEqual(expect.stringContaining('never the value itself'));
+  });
+
+  it('defaults to references, not names', () => {
+    const result = parseConfig(minimal);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.credentials).toEqual({
+      ascKeyId: '${ASC_API_KEY_ID}',
+      ascIssuerId: '${ASC_API_ISSUER_ID}',
+      ascKeyPath: '${ASC_API_KEY_PATH}',
+    });
+  });
+});
+
+describe('envRefName', () => {
+  it('unwraps a reference to the name the environment is keyed by', () => {
+    expect(envRefName('${ASC_API_KEY_ID}')).toBe('ASC_API_KEY_ID');
+    expect(envRefName('${A}')).toBe('A');
+  });
+
+  it('round-trips every default in the schema', () => {
+    const result = parseConfig(minimal);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    for (const ref of Object.values(result.config.credentials)) {
+      expect(`\${${envRefName(ref)}}`).toBe(ref);
+    }
+  });
+});
+
+describe('noiseWordsFor', () => {
+  it('derives commit types plus the bundle-id segments', () => {
+    const words = noiseWordsFor(testConfig());
+    for (const word of ['feat', 'fix', 'chore', 'io', 'acme', 'app', 'dev']) {
+      expect(words.has(word)).toBe(true);
+    }
+    expect(words.has('wave')).toBe(false);
+  });
+
+  it('uses the configured list verbatim, lowercased', () => {
+    const words = noiseWordsFor(testConfig({ variant: { noiseWords: ['Spike', 'WIP'] } }));
+    expect([...words].sort()).toEqual(['spike', 'wip']);
+  });
+});
+
+describe('labelPrefixFor', () => {
+  it('takes the first word of the display name', () => {
+    expect(labelPrefixFor(testConfig({ variant: { displayName: 'Acme Dev' } }))).toBe('Acme');
+    expect(labelPrefixFor(testConfig({ variant: { displayName: 'Acme' } }))).toBe('Acme');
+  });
+
+  it('prefers an explicit prefix', () => {
+    expect(labelPrefixFor(testConfig({ variant: { labelPrefix: 'AC' } }))).toBe('AC');
+  });
+});
+
+describe('formatConfigErrors', () => {
+  it('indents one problem per line', () => {
+    expect(formatConfigErrors([{ path: 'a.b', message: 'nope' }])).toBe('  a.b: nope');
+  });
+});
+
+describe('jsonSchema', () => {
+  it('generates from the same definition the validator uses', () => {
+    const schema = jsonSchema() as { properties: Record<string, unknown>; required?: string[] };
+    expect(Object.keys(schema.properties)).toContain('project');
+    expect(Object.keys(schema.properties)).toContain('ota');
+    expect(schema.required).toContain('configVersion');
+  });
+
+  it('describes optional sections as optional', () => {
+    const schema = jsonSchema() as { required?: string[] };
+    expect(schema.required).not.toContain('ota');
+    expect(schema.required).not.toContain('hooks');
+  });
+});

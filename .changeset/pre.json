@@ -1,0 +1,8 @@
+{
+  "mode": "pre",
+  "tag": "rc",
+  "initialVersions": {
+    "jetbridge": "0.0.0"
+  },
+  "changesets": ["adhoc-certificate", "cold-pandas-argue", "env-files", "timed-steps-and-json"]
+}
