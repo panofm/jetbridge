@@ -137,7 +137,9 @@ describe('escaping', () => {
 
 describe('setSetting', () => {
   it('writes the assignment into an empty file', () => {
-    expect(setSetting('', 'API_BASE_URL', PROD)).toBe('API_BASE_URL = https:/$()/api.example.com\n');
+    expect(setSetting('', 'API_BASE_URL', PROD)).toBe(
+      'API_BASE_URL = https:/$()/api.example.com\n',
+    );
   });
 
   it('replaces an existing assignment rather than adding a second one', () => {
@@ -228,7 +230,9 @@ describe('applyOverride', () => {
 
   it('leaves the rest of an existing file alone', () => {
     const boundary = fakeBoundary({
-      files: { [configPath]: '// generated\nOTHER = 1\nAPI_BASE_URL = https:/$()/old.example.com\n' },
+      files: {
+        [configPath]: '// generated\nOTHER = 1\nAPI_BASE_URL = https:/$()/old.example.com\n',
+      },
     });
     applyOverride(boundary, project, { preset: 'staging' });
     expect(boundary.fs.read(configPath)).toBe(

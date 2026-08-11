@@ -164,7 +164,9 @@ describe('the in-memory filesystem', () => {
     const boundary = fakeBoundary({ cwd: '/w' });
     boundary.fs.write('/w/text.txt', 'hello');
     boundary.fs.write('/w/bytes.bin', new TextEncoder().encode('hello'));
-    expect([...boundary.fs.readBytes('/w/text.txt')]).toEqual([...boundary.fs.readBytes('/w/bytes.bin')]);
+    expect([...boundary.fs.readBytes('/w/text.txt')]).toEqual([
+      ...boundary.fs.readBytes('/w/bytes.bin'),
+    ]);
     expect(boundary.fs.read('/w/bytes.bin')).toBe('hello');
   });
 

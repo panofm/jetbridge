@@ -58,14 +58,26 @@ function sortKeys(value) {
   );
 }
 
-export const serialize = (schema) => `${JSON.stringify(sortKeys(schema), null, 2)}\n`;
+/**
+ * Formatted by prettier, with the repo's own settings, rather than by
+ * `JSON.stringify` alone: the file is checked in, so `format:check` reformats it
+ * otherwise and the two guards then disagree forever about what is correct.
+ */
+export async function serialize(schema) {
+  const { default: prettier } = await import('prettier');
+  const options = (await prettier.resolveConfig(SCHEMA_PATH)) ?? {};
+  return prettier.format(JSON.stringify(sortKeys(schema), null, 2), {
+    ...options,
+    parser: 'json',
+  });
+}
 
 const isMain =
   process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url;
 
 if (isMain) {
   const check = process.argv.includes('--check');
-  const expected = serialize(await generate());
+  const expected = await serialize(await generate());
 
   if (!check) {
     mkdirSync(join(ROOT, 'schema'), { recursive: true });

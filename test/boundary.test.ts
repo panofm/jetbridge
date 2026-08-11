@@ -9,12 +9,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  isInteractive,
-  nodeBoundary,
-  nodeFileSystem,
-  type FileSystem,
-} from '../src/boundary.js';
+import { isInteractive, nodeBoundary, nodeFileSystem, type FileSystem } from '../src/boundary.js';
 import { fakeBoundary } from './helpers/fake-boundary.js';
 
 const boundary = nodeBoundary();

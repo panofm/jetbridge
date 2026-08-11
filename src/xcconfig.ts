@@ -40,17 +40,13 @@ const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
  * host never resolves — silently, so the build looks fine and simply talks to
  * nothing.
  */
-const LOOKS_LIKE_HOST =
-  /^(?:localhost|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)(?::\d+)?(?:[/?#]|$)/;
+const LOOKS_LIKE_HOST = /^(?:localhost|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)(?::\d+)?(?:[/?#]|$)/;
 
 /**
  * The value this run should write, or undefined when neither a value nor a
  * preset was given — in which case the file keeps whatever it already holds.
  */
-export function resolveOverrideValue(
-  request: OverrideRequest,
-  config: Config,
-): string | undefined {
+export function resolveOverrideValue(request: OverrideRequest, config: Config): string | undefined {
   const overrides = requireOverrides(config);
   const explicit = request.value?.trim();
 
