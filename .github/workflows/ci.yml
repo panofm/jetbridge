@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # One job, not five. A job bills a whole minute even when the script takes
+  # eight seconds, so splitting these checks apart costs money before any of
+  # them does work.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the changeset guard diffs against the base branch
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: No private identifiers
+        run: node scripts/check-no-private-identifiers.mjs
+      - name: Publishable changes carry a changeset
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=0
+          CHANGESET_BASE_REF=origin/${{ github.base_ref }} node scripts/check-changeset.mjs
+      - run: npx tsc --noEmit
+      - run: npx eslint .
+      - run: npx prettier --check .
+      - name: Schema matches the code that generates it
+        run: npm run check:schema
+      # Before the tests, not after: some tests drive the built CLI as a
+      # subprocess, and against a stale dist/ they would pass while testing
+      # yesterday's binary.
+      - name: Build the package
+        run: npm run build
+      - run: npx vitest run

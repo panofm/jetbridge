@@ -1,0 +1,100 @@
+name: Release (npm)
+
+# Automated npm releases through Changesets. Nothing is published from a
+# laptop — this is the only path to npm.
+#
+# Two phases, decided by whether changesets are pending on main:
+#   - A PR lands carrying `.changeset/*.md` → this job runs `changeset version`
+#     and opens/updates a "chore(release): version packages" PR that bumps the
+#     version, writes the CHANGELOG and deletes the consumed changesets.
+#   - That version PR is merged, leaving no changesets → this job builds and
+#     runs `changeset publish`, then pushes the git tag.
+#
+# Requires the NPM_TOKEN secret (an automation token) in the `npm-publish`
+# environment.
+
+# Only the two pushes that can produce work trigger this: one that lands a
+# changeset, and the version PR's own merge. Every other push to main would
+# start a runner to print "nothing to release" and still bill a full minute.
+# workflow_dispatch is the manual retry for a publish that died halfway.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.changeset/**'
+      - 'package.json'
+      - 'CHANGELOG.md'
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # the version commit, the git tag, the release
+  pull-requests: write # open and update the version packages PR
+  # No id-token: npm provenance requires a PUBLIC source repository, and this
+  # repo is private — npm rejects provenance with E422. Auth is NPM_TOKEN.
+
+jobs:
+  release:
+    name: Version or publish
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # changesets needs full history and tags
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      - name: Version PR or publish
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: npm run version-packages
+          publish: npm run release
+          commit: 'chore(release): version packages'
+          title: 'chore(release): version packages'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # NODE_AUTH_TOKEN feeds the .npmrc setup-node wrote; NPM_TOKEN keeps
+          # the action on token auth rather than OIDC trusted publishing. Both
+          # are the same automation token.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Make the run self-explanatory, instead of leaving the outcome buried in
+      # the action's logs.
+      - name: Summarize outcome
+        if: always() && steps.changesets.outcome == 'success'
+        env:
+          PUBLISHED: ${{ steps.changesets.outputs.published }}
+          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
+          PR_NUMBER: ${{ steps.changesets.outputs.pullRequestNumber }}
+          HAS_CHANGESETS: ${{ steps.changesets.outputs.hasChangesets }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Release outcome"
+            if [ "$PUBLISHED" = "true" ]; then
+              echo "📦 **Published to npm:**"
+              echo ""
+              echo "$PUBLISHED_PACKAGES" \
+                | jq -r '.[] | "- `\(.name)@\(.version)` — https://www.npmjs.com/package/\(.name)/v/\(.version)"'
+            elif [ -n "$PR_NUMBER" ]; then
+              echo "📝 Opened/updated the version packages PR: #$PR_NUMBER"
+              echo ""
+              echo "Merge it to publish."
+            elif [ "$HAS_CHANGESETS" = "true" ]; then
+              echo "📝 Changesets are pending — the version PR is being prepared."
+            else
+              echo "✅ Nothing to release — no pending changesets, and the version is already on npm."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
