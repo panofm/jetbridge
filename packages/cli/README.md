@@ -81,17 +81,24 @@ Every variant registers a bundle id and a profile with Apple, permanently. `jetb
     ],
   },
 
+  "credentials": {
+    "ascKeyId": "${ASC_API_KEY_ID}",
+    "ascIssuerId": "${ASC_API_ISSUER_ID}",
+  },
+
   "ota": {
     "storage": {
       "bucket": "acme-builds",
       "region": "eu-central-1",
       "publicBaseUrl": "https://builds.example.com",
+      "accessKeyId": "${JETBRIDGE_S3_ACCESS_KEY_ID}",
+      "secretAccessKey": "${JETBRIDGE_S3_SECRET_ACCESS_KEY}",
     },
   },
 }
 ```
 
-Nothing secret belongs in this file: credentials are referenced by environment variable **name**, never by value, so the config is safe to commit.
+Nothing secret belongs in this file. Every credential is a `${VAR}` reference to the environment, never a value, so the config is safe to commit — and a bare `"ASC_API_KEY_ID"` is rejected rather than guessed at, because it reads as either a name or the secret.
 
 Your project also has to consume a few build settings that jetbridge passes on the command line — appending the variant suffix to the bundle id, and pointing at the generated profile. Those lines, and the reduced entitlements a variant needs, are in **[Adopting jetbridge](docs/adopting.md)**.
 

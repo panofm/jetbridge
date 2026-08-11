@@ -18,6 +18,7 @@ import type { Boundary } from './boundary.js';
 import {
   CONFIG_FILENAMES,
   CONFIG_VERSION,
+  envRefName,
   formatConfigErrors,
   parseConfig,
   type Config,
@@ -100,9 +101,12 @@ export function assembleConfig(input: ConfigInput): Record<string, unknown> {
         ...(target.entitlements ? { entitlements: target.entitlements } : {}),
       })),
     },
+    // The wizard asks for a plain name, because typing `${…}` at a prompt is
+    // unpleasant. The FILE always carries the reference form, so a reader can
+    // never mistake it for the secret.
     credentials: {
-      ascKeyId: input.credentials.ascKeyId,
-      ascIssuerId: input.credentials.ascIssuerId,
+      ascKeyId: envRefFor(input.credentials.ascKeyId),
+      ascIssuerId: envRefFor(input.credentials.ascIssuerId),
     },
     ...(input.ota
       ? {
@@ -119,6 +123,9 @@ export function assembleConfig(input: ConfigInput): Record<string, unknown> {
       : {}),
   };
 }
+
+/** `ASC_API_KEY_ID` → `${ASC_API_KEY_ID}`, the only form the config accepts. */
+export const envRefFor = (name: string): string => `\${${name}}`;
 
 export const serializeConfig = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -341,8 +348,15 @@ function parseOtaAccess(value: string): OtaAccess {
   return fail(`--ota-access ${value}: must be ${OTA_ACCESS_MODES.join(' or ')}`);
 }
 
+/**
+ * A plain environment variable name. Deliberately stricter than a config
+ * identifier: whatever is typed here is wrapped as `${NAME}`, and a name the
+ * reference form cannot hold would only fail later, at validation.
+ */
 const envNameProblem = (value: string): string | undefined =>
-  /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value) ? undefined : 'must be a plain identifier';
+  /^[A-Za-z_][A-Za-z0-9_]*$/.test(value)
+    ? undefined
+    : 'an environment variable name, e.g. ASC_API_KEY_ID';
 
 /**
  * Whether this run answers its own questions.
@@ -699,10 +713,11 @@ async function verifyOta(
  * failure: the machine that runs `init` is not always the machine that signs.
  */
 function warnAboutCredentials(boundary: Boundary, config: Config): void {
+  // The config holds `${VAR}`; the environment is keyed by `VAR`.
   const unresolved = (
     [
-      ['credentials.ascKeyId', config.credentials.ascKeyId],
-      ['credentials.ascIssuerId', config.credentials.ascIssuerId],
+      ['credentials.ascKeyId', envRefName(config.credentials.ascKeyId)],
+      ['credentials.ascIssuerId', envRefName(config.credentials.ascIssuerId)],
     ] as const
   ).filter(([, name]) => boundary.env(name) === undefined);
 

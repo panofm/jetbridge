@@ -59,16 +59,28 @@ export ASC_API_KEY_ID=ABCD123456
 export ASC_API_ISSUER_ID=69a6de70-0000-0000-0000-000000000000
 ```
 
-Put them wherever your project already keeps local environment variables. The config file stores only these **variable names**, never their values, so the config is safe to commit and the key never is.
+Put them wherever your project already keeps local environment variables. The config file **references** the environment and never holds a value, so it is safe to commit and the key never is.
 
-Rename them if your project prefers:
+Rename the variables if your project prefers, using the `${VAR}` form:
 
 ```jsonc
 "credentials": {
-  "ascKeyId": "MY_ASC_KEY_ID",
-  "ascIssuerId": "MY_ASC_ISSUER_ID"
+  "ascKeyId": "${MY_ASC_KEY_ID}",
+  "ascIssuerId": "${MY_ASC_ISSUER_ID}"
 }
 ```
+
+The `${...}` is required, and a bare name is rejected:
+
+```
+credentials.ascKeyId: must reference an environment variable as "${VAR}" — never the value itself
+```
+
+That is the point of the shape. `"ascKeyId": "ABCD123456"` reads as either a variable name or the key id itself, and this file gets committed — so the ambiguity is removed rather than guessed at. It is the same convention as docker-compose, GitHub Actions and VS Code.
+
+Note which form goes where. The config carries `${ASC_API_KEY_ID}`; your shell exports the bare `ASC_API_KEY_ID`. When a variable does not resolve, jetbridge names the bare one, because that is what you have to export.
+
+The same rule covers the bucket credentials, `ota.storage.accessKeyId` and `ota.storage.secretAccessKey`.
 
 ## 5. Register your device
 

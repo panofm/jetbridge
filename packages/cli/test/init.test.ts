@@ -297,16 +297,46 @@ describe('the interactive flow', () => {
 });
 
 describe('credentials', () => {
-  it('stores the variable names and never the values behind them', async () => {
+  it('writes references, never the values behind them', async () => {
     const h = harness();
     await run(h, fullAnswers);
     const text = written(h.boundary);
     expect(JSON.parse(text).credentials).toEqual({
-      ascKeyId: 'ASC_API_KEY_ID',
-      ascIssuerId: 'ASC_API_ISSUER_ID',
+      ascKeyId: '${ASC_API_KEY_ID}',
+      ascIssuerId: '${ASC_API_ISSUER_ID}',
     });
     expect(text).not.toContain('SENTINEL-KEY-ID-VALUE');
     expect(text).not.toContain('SENTINEL-ISSUER-VALUE');
+  });
+
+  it('asks for a plain name and wraps it, so nobody types ${…} at a prompt', async () => {
+    const h = harness({ env: { MY_KEY: 'k', MY_ISSUER: 'i' } });
+    const { result } = await run(h, {
+      ...fullAnswers,
+      'credentials.ascKeyId': 'MY_KEY',
+      'credentials.ascIssuerId': 'MY_ISSUER',
+    });
+    expect(result.config?.credentials.ascKeyId).toBe('${MY_KEY}');
+    expect(result.config?.credentials.ascIssuerId).toBe('${MY_ISSUER}');
+  });
+
+  it('refuses a name the reference form could not hold', async () => {
+    // Caught at the prompt rather than at the end: `${MY-KEY}` is not a
+    // variable reference, and the config would reject it after the fact.
+    const h = harness();
+    await expect(run(h, { ...fullAnswers, 'credentials.ascKeyId': 'MY-KEY' })).rejects.toThrow(
+      /an environment variable name/,
+    );
+  });
+
+  it('takes a plain name from the flag too', async () => {
+    const h = harness({ env: { CI_KEY: 'k', CI_ISSUER: 'i' } });
+    const { result } = await run(
+      h,
+      {},
+      { yes: true, ascKeyIdEnv: 'CI_KEY', ascIssuerIdEnv: 'CI_ISSUER' },
+    );
+    expect(result.config?.credentials.ascKeyId).toBe('${CI_KEY}');
   });
 
   it('warns, but does not fail, when a name does not resolve today', async () => {

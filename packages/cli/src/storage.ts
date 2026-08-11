@@ -16,7 +16,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import type { Boundary } from './boundary.js';
-import type { OtaConfig } from './config.js';
+import { envRefName, type OtaConfig } from './config.js';
 import { fail } from './project.js';
 
 /** The slice of the S3 client this tool uses. A test supplies its own. */
@@ -47,12 +47,14 @@ export function credentials(
   boundary: Boundary,
   ota: OtaConfig,
 ): { accessKeyId: string; secretAccessKey: string } {
-  const accessKeyId = boundary.env(ota.storage.accessKeyId)?.trim();
-  const secretAccessKey = boundary.env(ota.storage.secretAccessKey)?.trim();
+  const accessKeyName = envRefName(ota.storage.accessKeyId);
+  const secretKeyName = envRefName(ota.storage.secretAccessKey);
+  const accessKeyId = boundary.env(accessKeyName)?.trim();
+  const secretAccessKey = boundary.env(secretKeyName)?.trim();
   if (!accessKeyId || !secretAccessKey) {
     const missing = [
-      !accessKeyId ? ota.storage.accessKeyId : null,
-      !secretAccessKey ? ota.storage.secretAccessKey : null,
+      !accessKeyId ? accessKeyName : null,
+      !secretAccessKey ? secretKeyName : null,
     ].filter(Boolean);
     fail(
       `the OTA bucket credentials are not set: ${missing.join(', ')}.\n` +

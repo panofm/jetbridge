@@ -42,21 +42,18 @@
       "default": {},
       "properties": {
         "ascIssuerId": {
-          "default": "ASC_API_ISSUER_ID",
-          "minLength": 1,
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+          "default": "${ASC_API_ISSUER_ID}",
+          "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$",
           "type": "string"
         },
         "ascKeyId": {
-          "default": "ASC_API_KEY_ID",
-          "minLength": 1,
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+          "default": "${ASC_API_KEY_ID}",
+          "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$",
           "type": "string"
         },
         "ascKeyPath": {
-          "default": "ASC_API_KEY_PATH",
-          "minLength": 1,
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+          "default": "${ASC_API_KEY_PATH}",
+          "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$",
           "type": "string"
         }
       },
@@ -131,9 +128,8 @@
         "storage": {
           "properties": {
             "accessKeyId": {
-              "default": "JETBRIDGE_S3_ACCESS_KEY_ID",
-              "minLength": 1,
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+              "default": "${JETBRIDGE_S3_ACCESS_KEY_ID}",
+              "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$",
               "type": "string"
             },
             "bucket": {
@@ -158,9 +154,8 @@
               "type": "string"
             },
             "secretAccessKey": {
-              "default": "JETBRIDGE_S3_SECRET_ACCESS_KEY",
-              "minLength": 1,
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+              "default": "${JETBRIDGE_S3_SECRET_ACCESS_KEY}",
+              "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$",
               "type": "string"
             }
           },

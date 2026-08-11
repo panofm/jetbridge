@@ -75,7 +75,11 @@ describe('credential resolution', () => {
 
   it('reads the variable names the config gives it, not hardcoded ones', () => {
     const renamed = testConfig({
-      credentials: { ascKeyId: 'MY_KEY', ascIssuerId: 'MY_ISSUER', ascKeyPath: 'MY_PATH' },
+      credentials: {
+        ascKeyId: '${MY_KEY}',
+        ascIssuerId: '${MY_ISSUER}',
+        ascKeyPath: '${MY_PATH}',
+      },
     });
     const boundary = fakeBoundary({
       env: { MY_KEY: 'KEY1', MY_ISSUER: 'issuer', MY_PATH: '/k.p8' },
@@ -89,10 +93,14 @@ describe('credential resolution', () => {
   });
 
   it('names the configured variables when it explains what is missing', () => {
-    const renamed = testConfig({ credentials: { ascKeyId: 'MY_KEY', ascIssuerId: 'MY_ISSUER' } });
+    const renamed = testConfig({
+      credentials: { ascKeyId: '${MY_KEY}', ascIssuerId: '${MY_ISSUER}' },
+    });
     const message = missingCredentialsMessage(renamed);
+    // The bare NAME, not the reference: a person has to type `export MY_KEY=…`.
     expect(message).toContain('MY_KEY');
     expect(message).toContain('MY_ISSUER');
+    expect(message).not.toContain('${MY_KEY}');
     expect(message).not.toContain('ASC_API_KEY_ID');
   });
 });

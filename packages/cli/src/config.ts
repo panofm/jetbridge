@@ -31,6 +31,24 @@ const identifier = z
   .min(1)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'must be a plain identifier');
 
+/**
+ * A reference to an environment variable, never a value.
+ *
+ * `"OTA_KEY_ID"` reads as either a variable name or the secret itself, and the
+ * config file is committed — so the shape has to be unmistakable. `${VAR}` is
+ * the convention people already know from docker-compose, GitHub Actions and
+ * VS Code, and a bare string is rejected rather than guessed at.
+ */
+const envRef = z
+  .string()
+  .regex(
+    /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/,
+    'must reference an environment variable as "${VAR}" — never the value itself',
+  );
+
+/** `${VAR}` → `VAR`. */
+export const envRefName = (ref: string): string => ref.slice(2, -1);
+
 const relativePath = z
   .string()
   .min(1)
@@ -164,9 +182,9 @@ const hooksSchema = z.object({
 
 const credentialsSchema = z.object({
   /** Environment variable NAMES. A secret never belongs in this file. */
-  ascKeyId: identifier.default('ASC_API_KEY_ID'),
-  ascIssuerId: identifier.default('ASC_API_ISSUER_ID'),
-  ascKeyPath: identifier.default('ASC_API_KEY_PATH'),
+  ascKeyId: envRef.default('${ASC_API_KEY_ID}'),
+  ascIssuerId: envRef.default('${ASC_API_ISSUER_ID}'),
+  ascKeyPath: envRef.default('${ASC_API_KEY_PATH}'),
 });
 
 const otaStorageSchema = z.object({
@@ -184,8 +202,8 @@ const otaStorageSchema = z.object({
     .url()
     .refine((u) => u.startsWith('https://'), 'must be https:// — iOS refuses to install over http'),
   prefix: z.string().default('builds'),
-  accessKeyId: identifier.default('JETBRIDGE_S3_ACCESS_KEY_ID'),
-  secretAccessKey: identifier.default('JETBRIDGE_S3_SECRET_ACCESS_KEY'),
+  accessKeyId: envRef.default('${JETBRIDGE_S3_ACCESS_KEY_ID}'),
+  secretAccessKey: envRef.default('${JETBRIDGE_S3_SECRET_ACCESS_KEY}'),
 });
 
 const otaSchema = z.object({

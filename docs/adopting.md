@@ -309,6 +309,21 @@ A variant on the **simulator** never hits that check, which is what makes step 3
 
 `jetbridge link` archives the build, uploads it to a bucket you own, and prints a URL someone else opens on their phone. It is opt-in: `jetbridge init` asks whether you want it, or `init --ota` takes it non-interactively with the `--ota-bucket`, `--ota-region`, `--ota-endpoint` and `--ota-public-base-url` flags.
 
+The bucket credentials are referenced, never stored. Like every credential in this file, they are `${VAR}` references to the environment, so the config holds no secret and stays safe to commit:
+
+```jsonc
+"ota": {
+  "storage": {
+    "bucket": "acme-builds",
+    "publicBaseUrl": "https://builds.example.com",
+    "accessKeyId": "${JETBRIDGE_S3_ACCESS_KEY_ID}",
+    "secretAccessKey": "${JETBRIDGE_S3_SECRET_ACCESS_KEY}",
+  },
+}
+```
+
+Those two are the defaults, so you only write them to point at variables you already use. A bare `"JETBRIDGE_S3_ACCESS_KEY_ID"` is rejected — it reads as either a variable name or the key itself, and this file is committed.
+
 Before it writes anything, `init` uploads a small test object, fetches it back over the public base URL and deletes it. A bucket that accepts uploads but does not serve them publicly is the common misconfiguration, and this is where it costs ten seconds instead of a fifteen-minute archive.
 
 ### How install URLs are protected

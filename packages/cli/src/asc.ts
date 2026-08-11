@@ -9,7 +9,7 @@
 import { createPrivateKey, sign as cryptoSign } from 'node:crypto';
 import { join } from 'node:path';
 import type { Boundary } from './boundary.js';
-import type { Config } from './config.js';
+import { envRefName, type Config } from './config.js';
 import { fail } from './project.js';
 
 export const ASC_BASE = 'https://api.appstoreconnect.apple.com';
@@ -24,7 +24,9 @@ export interface AscCredentials {
 }
 
 export function missingCredentialsMessage(config: Config): string {
-  const { ascKeyId, ascIssuerId, ascKeyPath } = config.credentials;
+  const ascKeyId = envRefName(config.credentials.ascKeyId);
+  const ascIssuerId = envRefName(config.credentials.ascIssuerId);
+  const ascKeyPath = envRefName(config.credentials.ascKeyPath);
   return (
     'App Store Connect credentials are not configured.\n' +
     `  Set ${ascKeyId} and ${ascIssuerId} in the environment, and place the private key at\n` +
@@ -49,11 +51,11 @@ export function keySearchDirs(boundary: Boundary): string[] {
  * and saying so beats failing.
  */
 export function localCredentials(boundary: Boundary, config: Config): AscCredentials | null {
-  const keyId = boundary.env(config.credentials.ascKeyId);
-  const issuerId = boundary.env(config.credentials.ascIssuerId);
+  const keyId = boundary.env(envRefName(config.credentials.ascKeyId));
+  const issuerId = boundary.env(envRefName(config.credentials.ascIssuerId));
   if (!keyId || !issuerId) return null;
 
-  const explicit = boundary.env(config.credentials.ascKeyPath);
+  const explicit = boundary.env(envRefName(config.credentials.ascKeyPath));
   const keyPath =
     explicit ??
     keySearchDirs(boundary)

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CONFIG_VERSION,
+  envRefName,
   formatConfigErrors,
   jsonSchema,
   labelPrefixFor,
@@ -41,7 +42,7 @@ describe('defaults', () => {
     });
     expect(result.config.variant.labelBudget).toBe(14);
     expect(result.config.variant.targets).toEqual([]);
-    expect(result.config.credentials.ascKeyId).toBe('ASC_API_KEY_ID');
+    expect(result.config.credentials.ascKeyId).toBe('${ASC_API_KEY_ID}');
     expect(result.config.git.defaultBranch).toBe('main');
     expect(result.config.git.requireCleanDefaultBranch).toBe(false);
     expect(result.config.ota).toBeUndefined();
@@ -249,15 +250,81 @@ describe('variant targets', () => {
 });
 
 describe('credentials never hold secrets', () => {
-  it('stores variable names, and rejects anything that is not one', () => {
-    const result = parseConfig({
-      ...minimal,
-      credentials: { ascKeyId: 'MY_KEY_ID' },
-    });
+  it('accepts a reference to an environment variable', () => {
+    const result = parseConfig({ ...minimal, credentials: { ascKeyId: '${MY_KEY_ID}' } });
     expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.credentials.ascKeyId).toBe('${MY_KEY_ID}');
+  });
+
+  it('rejects a bare name, and says which form it wants', () => {
+    // `"MY_KEY_ID"` reads as either a variable name or the secret itself, and
+    // this file is committed. Guessing between them is the whole problem.
+    expect(errorsFor({ ...minimal, credentials: { ascKeyId: 'MY_KEY_ID' } })).toContainEqual(
+      expect.stringContaining('must reference an environment variable as "${VAR}"'),
+    );
+  });
+
+  it('rejects a pasted secret, which is the failure this exists to prevent', () => {
+    for (const secret of [
+      'AKIAIOSFODNN7EXAMPLE',
+      'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+      '-----BEGIN PRIVATE KEY-----',
+    ]) {
+      expect(errorsFor({ ...minimal, credentials: { ascKeyId: secret } })).toContainEqual(
+        expect.stringContaining('never the value itself'),
+      );
+    }
+  });
+
+  it('rejects a reference that is not a usable variable name', () => {
+    for (const malformed of ['${}', '${MY KEY}', '${MY-KEY}', '$MY_KEY', '${MY_KEY', 'MY_KEY}']) {
+      expect(errorsFor({ ...minimal, credentials: { ascKeyId: malformed } })).toContainEqual(
+        expect.stringContaining('${VAR}'),
+      );
+    }
+  });
+
+  it('applies the same rule to the bucket credentials', () => {
     expect(
-      errorsFor({ ...minimal, credentials: { ascKeyId: 'not a variable name' } }),
-    ).toContainEqual(expect.stringContaining('plain identifier'));
+      errorsFor({
+        ...minimal,
+        ota: {
+          storage: {
+            bucket: 'acme-builds',
+            publicBaseUrl: 'https://builds.example.com',
+            accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+          },
+        },
+      }),
+    ).toContainEqual(expect.stringContaining('never the value itself'));
+  });
+
+  it('defaults to references, not names', () => {
+    const result = parseConfig(minimal);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.credentials).toEqual({
+      ascKeyId: '${ASC_API_KEY_ID}',
+      ascIssuerId: '${ASC_API_ISSUER_ID}',
+      ascKeyPath: '${ASC_API_KEY_PATH}',
+    });
+  });
+});
+
+describe('envRefName', () => {
+  it('unwraps a reference to the name the environment is keyed by', () => {
+    expect(envRefName('${ASC_API_KEY_ID}')).toBe('ASC_API_KEY_ID');
+    expect(envRefName('${A}')).toBe('A');
+  });
+
+  it('round-trips every default in the schema', () => {
+    const result = parseConfig(minimal);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    for (const ref of Object.values(result.config.credentials)) {
+      expect(`\${${envRefName(ref)}}`).toBe(ref);
+    }
   });
 });
 
