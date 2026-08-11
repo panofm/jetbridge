@@ -183,6 +183,24 @@ jetbridge passes a few build settings on the xcodebuild command line; your xccon
 - Node 20 or newer
 - An Apple Developer account, for anything that signs for a device
 
+## Releasing
+
+Releases go through [Changesets](https://github.com/changesets/changesets). Nothing is published from a laptop.
+
+A pull request that changes anything shipped — `src/`, `templates/`, `schema/`, `package.json`, `README.md` — has to carry a changeset, and CI fails the PR if it does not:
+
+```sh
+npx changeset          # pick patch / minor / major, describe the change
+git add .changeset
+```
+
+From there it is automatic:
+
+1. The PR lands on `main`. The release workflow opens a **"chore(release): version packages"** PR that bumps the version, writes the CHANGELOG and deletes the consumed changesets.
+2. Merging that PR publishes to npm and pushes the git tag.
+
+The only requirement is an `NPM_TOKEN` automation token in the repository's `npm-publish` environment.
+
 ## License
 
 MIT
