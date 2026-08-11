@@ -1,0 +1,67 @@
+{
+  "name": "jetbridge",
+  "version": "0.0.0",
+  "description": "Build, sign and deliver iOS dev builds — to a simulator, down a cable, or over the air to your own bucket.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "jetbridge": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./schema": "./schema/v1.json"
+  },
+  "files": [
+    "dist",
+    "schema",
+    "templates"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.984.0",
+    "@clack/prompts": "^1.0.1",
+    "chalk": "^5.6.2",
+    "commander": "^15.0.0",
+    "execa": "^9.5.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0",
+    "vitest": "^2.1.8"
+  },
+  "keywords": [
+    "ios",
+    "xcode",
+    "xcodebuild",
+    "install",
+    "ota",
+    "ad-hoc",
+    "itms-services",
+    "testflight",
+    "simulator",
+    "devicectl"
+  ]
+}
