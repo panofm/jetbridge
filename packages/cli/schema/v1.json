@@ -319,31 +319,6 @@
       },
       "required": ["displayName"],
       "type": "object"
-    },
-    "xcconfigOverrides": {
-      "properties": {
-        "file": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "key": {
-          "minLength": 1,
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-          "type": "string"
-        },
-        "presets": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "default": {},
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      },
-      "required": ["file", "key"],
-      "type": "object"
     }
   },
   "required": ["configVersion", "project", "variant"],

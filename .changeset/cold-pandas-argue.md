@@ -12,4 +12,5 @@ Build, sign and deliver iOS dev builds from one config file:
 - `jetbridge bundles ls / provision / rm / prune` manages what those variants register with Apple. Deleting is a dry run by default, because Apple restores nothing.
 - Bundle ids, capabilities and provisioning profiles are registered through the App Store Connect API directly, because `xcodebuild -allowProvisioningUpdates` cannot register a new bundle id headlessly.
 - Every command reports timed steps while it works, prints the identity and signing decision before anything slow, and takes `--json` for scripts and agents.
+- Hooks (`hooks.preBuild` / `hooks.postBuild`) run in the project root and inherit the environment, which is where anything project-specific belongs — pointing a build at a different API, for instance.
 - Every command runs unattended: no `CI` variable to set, nothing prompts when there is nobody to ask, and no child process can inherit an open stdin and hang.

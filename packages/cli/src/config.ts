@@ -152,15 +152,6 @@ const variantSchema = z.object({
   profilePrefix: z.string().min(1).optional(),
 });
 
-const xcconfigOverrideSchema = z.object({
-  /** Git-ignored xcconfig the build already `#include?`s, relative to the project root. */
-  file: relativePath,
-  /** Build setting to rewrite, e.g. an API base URL. */
-  key: identifier,
-  /** Named shortcuts, exposed as `--<name>` on the build commands. */
-  presets: z.record(z.string(), z.string()).prefault({}),
-});
-
 const hooksSchema = z.object({
   /**
    * Shell commands run in the project root. JSON cannot hold a function; this
@@ -253,7 +244,6 @@ export const configSchema = z
     project: projectSchema,
     configurations: configurationsSchema.prefault({}),
     variant: variantSchema,
-    xcconfigOverrides: xcconfigOverrideSchema.optional(),
     hooks: hooksSchema.prefault({}),
     credentials: credentialsSchema.prefault({}),
     ota: otaSchema.optional(),
