@@ -443,10 +443,14 @@ export async function liveBranchSlugs(boundary: Boundary, project: Project): Pro
     );
   }
 
-  const remote = await boundary.exec.run('git', ['ls-remote', '--heads', 'origin'], {
-    cwd: project.root,
-    allowFail: true,
-  });
+  const remote = await boundary.exec.run(
+    'git',
+    ['ls-remote', '--heads', project.config.git.remote],
+    {
+      cwd: project.root,
+      allowFail: true,
+    },
+  );
   // Refusing here is the whole safety property. Unreachable must never read as
   // "every branch is gone", which would take the entire account with it.
   if (!remote.ok) {

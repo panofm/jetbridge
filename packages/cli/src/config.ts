@@ -229,6 +229,8 @@ const otaSchema = z.object({
 const gitSchema = z.object({
   /** Repos disagree: main, master, trunk. */
   defaultBranch: z.string().min(1).default('main'),
+  /** The remote to read branches from. Not every checkout calls it `origin`. */
+  remote: z.string().min(1).default('origin'),
   /**
    * A plain (non-variant) install overwrites the app every session shares, so
    * its provenance has to be knowable. Off by default — it is a strong

@@ -86,27 +86,28 @@ export async function requireCleanDefaultBranch(
   const branch = config.git.defaultBranch;
   // Fetch first, so the comparison is against the remote's branch rather than
   // whatever a stale local ref remembers. Being offline is survivable.
-  const fetched = await boundary.exec.run('git', ['fetch', 'origin', branch, '--quiet'], {
+  const remote = config.git.remote;
+  const fetched = await boundary.exec.run('git', ['fetch', remote, branch, '--quiet'], {
     cwd: project.root,
     allowFail: true,
   });
   if (!fetched.ok) {
-    boundary.log.warn(`could not fetch origin/${branch} — comparing against the local ref`);
+    boundary.log.warn(`could not fetch ${remote}/${branch} — comparing against the local ref`);
   }
-  const remote = boundary.exec.runSync('git', ['rev-parse', `origin/${branch}`], {
+  const resolved = boundary.exec.runSync('git', ['rev-parse', `${remote}/${branch}`], {
     cwd: project.root,
     allowFail: true,
   });
-  const remoteSha = remote.stdout.trim();
+  const remoteSha = resolved.stdout.trim();
 
-  if (!remote.ok || stamp.sha !== remoteSha || stamp.dirty) {
-    const why = !remote.ok
-      ? `origin/${branch} could not be resolved`
+  if (!resolved.ok || stamp.sha !== remoteSha || stamp.dirty) {
+    const why = !resolved.ok
+      ? `${remote}/${branch} could not be resolved`
       : stamp.sha !== remoteSha
-        ? `HEAD is ${stamp.shortSha}, origin/${branch} is ${remoteSha.slice(0, 7)}`
+        ? `HEAD is ${stamp.shortSha}, ${remote}/${branch} is ${remoteSha.slice(0, 7)}`
         : 'the working tree has uncommitted changes to tracked files';
     fail(
-      `a plain install must build exactly origin/${branch} — ${why}.\n` +
+      `a plain install must build exactly ${remote}/${branch} — ${why}.\n` +
         '  The plain app is shared by every branch, so a branch or dirty build makes its\n' +
         `  vintage unknowable on the phone. Either merge first and install from ${branch},\n` +
         '  or install this branch beside it as its own app with --suffix.',
