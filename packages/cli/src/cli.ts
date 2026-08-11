@@ -7,7 +7,7 @@
  */
 import chalk from 'chalk';
 import { Command, InvalidArgumentError } from 'commander';
-import { nodeBoundary, type Boundary } from './boundary.js';
+import { nodeBoundary, nodeReporter, type Boundary } from './boundary.js';
 import { listBundles, provisionBundles, pruneBundles, removeBundles } from './bundles.js';
 import { loadEnv } from './env.js';
 import { runInit } from './init.js';
@@ -57,6 +57,17 @@ function resolveVariant(
 
 const program = new Command();
 
+/**
+ * `--json` on every command, not only the root.
+ *
+ * Commander has no global options: an option declared on the parent is a parse
+ * error after the subcommand name, which is exactly where a person types it.
+ * So it is declared everywhere and read back with `optsWithGlobals`, and both
+ * `jetbridge --json install` and `jetbridge install --json` work.
+ */
+const machine = (command: Command): Command =>
+  command.option('--json', 'newline-delimited JSON events on stdout, for scripts and agents');
+
 program
   .name('jetbridge')
   .description('Build, sign and deliver iOS dev builds — to a simulator, a cable, or your bucket.')
@@ -66,10 +77,26 @@ program
   // a terminal who wants it anyway.
   .option('--non-interactive', 'never prompt, even on a terminal')
   .showHelpAfterError();
+machine(program);
+
+/**
+ * One reporter for the whole run, replaced once the flags are parsed.
+ *
+ * It exists before parsing because the failure path needs somewhere to write:
+ * `open()` throws when there is no config file, and by then the boundary that
+ * would have carried a reporter was never built.
+ */
+let reporter = nodeReporter();
+program.hook('preAction', (_root, action) => {
+  if (action.optsWithGlobals().json) reporter = nodeReporter({ json: true });
+});
 
 /** Resolved per command, so `--config-file` on the root still applies. */
 const open = (): { boundary: Boundary; project: Project } => {
-  const boundary = nodeBoundary({ nonInteractive: Boolean(program.opts().nonInteractive) });
+  const boundary = nodeBoundary({
+    nonInteractive: Boolean(program.opts().nonInteractive),
+    reporter,
+  });
   const configPath = program.opts().configFile as string | undefined;
   const project = loadProject(boundary, { configPath });
   // After the project is found, because the files are read relative to its
@@ -102,8 +129,7 @@ const SUFFIX_HELP = 'variant build; a bare flag names it after the current git b
 const NAME_FLAG = '-n, --name <name>';
 const NAME_HELP = 'home-screen display name';
 
-program
-  .command('init')
+machine(program.command('init'))
   .description('write jetbridge.config.json by inspecting this Xcode project')
   .option('-y, --yes', 'accept every detected default and never prompt')
   .option('--ios-dir <dir>', 'directory holding the Xcode project')
@@ -117,7 +143,11 @@ program
   .option('--ota-endpoint <url>', 'for an S3-compatible host (R2, MinIO, Backblaze)')
   .option('--ota-public-base-url <url>', 'where uploaded builds are readable (https only)')
   .action(async (options) => {
-    const boundary = nodeBoundary({ nonInteractive: Boolean(program.opts().nonInteractive) });
+    const boundary = nodeBoundary({
+      nonInteractive: Boolean(program.opts().nonInteractive),
+      reporter,
+    });
+    boundary.report.start({ command: 'init', title: ['jetbridge init'] });
     const result = await runInit(
       boundary,
       {
@@ -135,10 +165,16 @@ program
       },
       { prompts: clackPrompter() },
     );
-    if (result.status === 'written') console.error(chalk.green(`wrote ${result.configPath}`));
+    if (result.status === 'written')
+      boundary.report.note(chalk.green(`wrote ${result.configPath}`));
     else if (result.status === 'unchanged') {
-      console.error(chalk.dim(`${result.configPath} is already up to date`));
-    } else console.error(chalk.dim('nothing written'));
+      boundary.report.note(chalk.dim(`${result.configPath} is already up to date`));
+    } else boundary.report.note(chalk.dim('nothing written'));
+    boundary.report.emit('init', {
+      status: result.status,
+      ...(result.configPath ? { configPath: result.configPath } : {}),
+    });
+    boundary.report.done(true, { status: result.status });
   });
 
 /**
@@ -166,8 +202,7 @@ function resolveDestination(options: { device?: string | boolean; simulator?: st
   };
 }
 
-program
-  .command('install')
+machine(program.command('install'))
   .description('build and install — on a simulator by default, or over the cable with --device')
   .option(SUFFIX_FLAG, SUFFIX_HELP, parseSuffix)
   .option(NAME_FLAG, NAME_HELP, parseName)
@@ -203,8 +238,7 @@ program
     });
   });
 
-program
-  .command('link')
+machine(program.command('link'))
   .description('archive, upload to your bucket, and print a link anyone can install from')
   .option(SUFFIX_FLAG, SUFFIX_HELP, parseSuffix)
   .option(NAME_FLAG, NAME_HELP, parseName)
@@ -213,22 +247,23 @@ program
   .option('-c, --configuration <name>', 'build configuration')
   .action(async (options) => {
     const { boundary, project } = open();
-    const result = await otaInstall(boundary, project, {
+    await otaInstall(boundary, project, {
       ...resolveVariant(boundary, project, options),
       configuration: options.configuration,
     });
-    console.error('');
-    console.error(chalk.green(`install: ${result.installUrl}`));
-    console.error(chalk.dim(`builds:  ${result.indexUrl}`));
   });
 
-program
-  .command('reindex')
+machine(program.command('reindex'))
   .description('rebuild the build index page from what is in the bucket')
   .action(async () => {
     const { boundary, project } = open();
-    const url = await reindex(boundary, project, {});
-    console.error(chalk.green(`rebuilt: ${url}`));
+    boundary.report.start({
+      command: 'reindex',
+      title: ['reindex', project.config.project.baseBundleId],
+    });
+    const result = await reindex(boundary, project, {});
+    boundary.report.note(chalk.green(`rebuilt: ${result.indexUrl}`));
+    boundary.report.done(true, { builds: result.builds });
   });
 
 /**
@@ -238,22 +273,24 @@ program
  * that used to live here said nothing about what it acted on, and what it acts
  * on is permanent account state that Apple will not restore.
  */
-const bundles = program
-  .command('bundles')
-  .description('variant bundle ids and profiles registered with Apple for this project');
+const bundles = machine(
+  program
+    .command('bundles')
+    .description('variant bundle ids and profiles registered with Apple for this project'),
+);
 
-bundles
-  .command('ls', { isDefault: true })
+machine(bundles.command('ls', { isDefault: true }))
   .alias('list')
   .description('what this project has registered')
-  .option('--json', 'machine-readable output')
-  .action(async (options: { json?: boolean }) => {
+  .action(async () => {
     const { boundary, project } = open();
-    await listBundles(boundary, project, { json: Boolean(options.json) });
+    // Read off the reporter, not the action's own options: commander hoists a
+    // repeated flag to the ancestor that declared it first, so `--json` lands in
+    // a different bag depending on where it was typed. The hook already resolved it.
+    await listBundles(boundary, project, { json: boundary.report.json });
   });
 
-bundles
-  .command('provision [slug]')
+machine(bundles.command('provision [slug]'))
   .description('register and refresh profiles now, without building')
   .action(async (slug: string | undefined) => {
     const { boundary, project } = open();
@@ -261,8 +298,7 @@ bundles
     await provisionBundles(boundary, project, variant);
   });
 
-bundles
-  .command('rm <slug...>')
+machine(bundles.command('rm <slug...>'))
   .description('remove these variants by name')
   .option('-y, --yes', 'actually delete (without this, the plan is printed and nothing changes)')
   .action(async (slugs: string[], options: { yes?: boolean }) => {
@@ -277,8 +313,7 @@ bundles
     });
   });
 
-bundles
-  .command('prune')
+machine(bundles.command('prune'))
   .description('remove variants whose git branch is gone from the remote')
   .option('-y, --yes', 'actually delete (without this, the plan is printed and nothing changes)')
   .action(async (options: { yes?: boolean }) => {
@@ -303,12 +338,14 @@ function assertSingleSegmentLoose(value: string): string {
 try {
   await program.parseAsync(process.argv);
 } catch (error) {
-  if (error instanceof JetbridgeError) {
-    console.error(chalk.red(`✗ ${error.message}`));
-  } else {
-    console.error(chalk.red(`✗ ${(error as Error)?.stack ?? String(error)}`));
-  }
-  process.exit(1);
+  const message =
+    error instanceof JetbridgeError ? error.message : ((error as Error)?.stack ?? String(error));
+  reporter.error(message);
+  reporter.done(false);
+  // `exitCode`, never `exit`: stdout is a pipe whenever `--json` is worth
+  // having, and `process.exit` drops whatever is still in its buffer — which is
+  // the error event, the one line a consumer is waiting for.
+  process.exitCode = 1;
 }
 
 export { assertSingleSegment, resolveVariant };

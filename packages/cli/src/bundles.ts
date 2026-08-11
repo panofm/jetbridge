@@ -153,14 +153,29 @@ export function groupVariants(
     .sort((a, b) => a.suffix.localeCompare(b.suffix));
 }
 
-/** Everything this project has registered, in one round trip pair. */
+/**
+ * Everything this project has registered, in one round trip pair.
+ *
+ * `quiet` exists for `ls --json`, whose stdout is a bare array that predates the
+ * event stream and has to stay exactly that. A step event would land in the
+ * middle of it, so that one caller reports through the plain logger instead.
+ */
 export async function readAccount(
   boundary: Boundary,
   project: Project,
+  options: { quiet?: boolean } = {},
 ): Promise<{ client: AscClient; variants: RegisteredVariant[] }> {
   const client = connect(boundary, project.config);
-  boundary.log.step('reading the developer account');
-  const [bundleIds, profiles] = await Promise.all([fetchBundleIds(client), fetchProfiles(client)]);
+  const read = (): Promise<[RegisteredBundleId[], RegisteredProfile[]]> =>
+    Promise.all([fetchBundleIds(client), fetchProfiles(client)]);
+  let bundleIds: RegisteredBundleId[];
+  let profiles: RegisteredProfile[];
+  if (options.quiet) {
+    boundary.log.step('reading the developer account');
+    [bundleIds, profiles] = await read();
+  } else {
+    [bundleIds, profiles] = await boundary.report.run('account', 'read the account', read);
+  }
   return { client, variants: groupVariants(bundleIds, profiles, project.config) };
 }
 
@@ -230,24 +245,25 @@ export function renderTable(variants: RegisteredVariant[]): string {
 /**
  * The listing.
  *
- * The payload goes to STDOUT, not through `boundary.log` — every logger there is
- * stderr, and `bundles ls --json | jq` has to receive something. It is also
- * returned, so a caller can capture it instead and so the shape is testable
- * without scraping a stream.
+ * The payload goes to STDOUT — every human line is stderr, and `bundles ls
+ * --json | jq` has to receive something. With `--json` that payload is the whole
+ * of stdout: one array, not an event stream, because scripts already parse it
+ * that way. It is also returned, so the shape is testable without scraping a
+ * stream.
  */
 export async function listBundles(
   boundary: Boundary,
   project: Project,
   options: { json?: boolean } = {},
 ): Promise<string> {
-  const { variants } = await readAccount(boundary, project);
+  const { variants } = await readAccount(boundary, project, { quiet: options.json });
   if (variants.length === 0 && !options.json) {
     boundary.log.info(`no variants of ${project.config.project.baseBundleId} are registered.`);
   }
   const output = options.json
     ? JSON.stringify(toRecords(variants), null, 2)
     : renderTable(variants);
-  console.log(output);
+  boundary.report.write(output);
   return output;
 }
 
@@ -322,29 +338,44 @@ async function removeSelected(
   selected: Array<{ variant: RegisteredVariant; reason?: string }>,
   yes: boolean,
 ): Promise<RemovalResult> {
-  boundary.log.info(
+  const report = boundary.report;
+  report.note(
     yes
       ? 'deleting from the Apple Developer account:'
       : 'would delete from the Apple Developer account:',
   );
   for (const { variant, reason } of selected) {
-    boundary.log.info(describe(variant, reason).join('\n'));
+    report.note(describe(variant, reason).join('\n'));
   }
+  report.emit('plan', {
+    dryRun: !yes,
+    variants: selected.map(({ variant, reason }) => ({
+      slug: variant.suffix,
+      bundleId: variant.app.identifier,
+      name: variant.app.name,
+      extensions: variant.extensions.map((extension) => extension.identifier),
+      profiles: variant.profiles.map((profile) => profile.name),
+      ...(reason ? { reason } : {}),
+    })),
+  });
 
   const slugs = selected.map(({ variant }) => variant.suffix);
   if (!yes) {
-    boundary.log.warn(
+    report.warn(
       `dry run — nothing was deleted. Re-run with -y to remove ${slugs.length} variant(s).`,
     );
+    report.done(true, { removed: 0, dryRun: true, slugs });
     return { slugs, dryRun: true };
   }
 
   for (const { variant } of selected) {
-    boundary.log.step(`deleting ${variant.app.identifier}`);
-    await deleteVariant(boundary, client, project.config, variant);
-    boundary.log.info(`removed ${variant.app.identifier}`);
+    await report.run('remove', variant.suffix, async (step) => {
+      step.detail(variant.app.identifier);
+      step.data({ slug: variant.suffix, bundleId: variant.app.identifier });
+      await deleteVariant(boundary, client, project.config, variant);
+    });
   }
-  boundary.log.info(`done — ${slugs.length} variant(s) removed.`);
+  report.done(true, { removed: slugs.length, dryRun: false, slugs });
   return { slugs, dryRun: false };
 }
 
@@ -359,6 +390,12 @@ export async function removeBundles(
         '  `jetbridge bundles ls` shows what is registered; `bundles prune` removes the stale ones.',
     );
   }
+
+  boundary.report.start({
+    command: 'bundles rm',
+    data: { slugs: options.suffixes, yes: Boolean(options.yes) },
+    title: ['bundles rm', options.suffixes.join(', ')],
+  });
 
   const { client, variants } = await readAccount(boundary, project);
   const selected = options.suffixes.map((slug) => {
@@ -449,6 +486,12 @@ export async function pruneBundles(
   project: Project,
   options: { yes?: boolean } = {},
 ): Promise<RemovalResult> {
+  boundary.report.start({
+    command: 'bundles prune',
+    data: { yes: Boolean(options.yes) },
+    title: ['bundles prune', project.config.project.baseBundleId],
+  });
+
   // Before the account read: being offline is the answer either way, and it
   // costs nothing to find out first.
   const live = await liveBranchSlugs(boundary, project);
@@ -456,11 +499,12 @@ export async function pruneBundles(
 
   const stale = variants.filter((variant) => !live.has(variant.suffix));
   const kept = variants.length - stale.length;
-  boundary.log.info(
+  boundary.report.note(
     `${variants.length} variant(s) registered, ${kept} with a branch still on the remote.`,
   );
   if (stale.length === 0) {
-    boundary.log.info('nothing to prune.');
+    boundary.report.note('nothing to prune.');
+    boundary.report.done(true, { removed: 0, dryRun: false, slugs: [] });
     return { slugs: [], dryRun: false };
   }
 
@@ -496,10 +540,24 @@ export async function provisionBundles(
         '  for this command to register.',
     );
   }
-  const profiles = await provisionVariant(boundary, project, { suffix, displayName });
-  for (const profile of profiles) {
-    boundary.log.info(`${profile.bundleId} → "${profile.profileName}" (${profile.installedAt})`);
-  }
-  boundary.log.info(`done — ${profiles.length} profile(s) installed for "${suffix}".`);
+  boundary.report.start({
+    command: 'bundles provision',
+    data: { suffix, displayName },
+    title: ['bundles provision', suffix],
+  });
+  const profiles = await boundary.report.run('provision', 'provisioned', async (step) => {
+    const minted = await provisionVariant(boundary, project, { suffix, displayName });
+    step.detail(minted.map((profile) => profile.profileName).join(' + '));
+    step.data({
+      profiles: minted.map((profile) => ({
+        target: profile.target,
+        bundleId: profile.bundleId,
+        name: profile.profileName,
+        installedAt: profile.installedAt,
+      })),
+    });
+    return minted;
+  });
+  boundary.report.done(true, { profiles: profiles.length });
   return profiles;
 }

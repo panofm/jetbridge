@@ -13,6 +13,7 @@ import type {
   HttpResponse,
   RunOptions,
 } from '../../src/boundary.js';
+import { createReporter } from '../../src/reporter.js';
 
 export interface StubbedCommand {
   /** Matches when every token appears in `[command, ...args]`, in order. */
@@ -20,6 +21,12 @@ export interface StubbedCommand {
   stdout?: string;
   stderr?: string;
   code?: number;
+  /**
+   * How long this command "takes". Attached to the stub rather than ticked per
+   * call, so an asserted duration depends on the command a test is about and
+   * not on how many `command -v` probes ran ahead of it.
+   */
+  durationMs?: number;
 }
 
 export interface StubbedRequest {
@@ -42,6 +49,10 @@ export interface FakeBoundaryOptions {
   interactive?: boolean;
   /** Unmatched commands fail loudly by default; some tests want a quiet zero. */
   defaultCommandResult?: Partial<CommandResult>;
+  /** Machine output on the stdout channel, as `--json` turns on. */
+  json?: boolean;
+  /** A terminal that can rewrite its last line. Off, like every pipe. */
+  tty?: boolean;
 }
 
 export interface FakeBoundary extends Boundary {
@@ -52,6 +63,15 @@ export interface FakeBoundary extends Boundary {
   /** Every argv the fake saw, joined — handy for a quick `toContain`. */
   commandLines(): string[];
   findCall(...tokens: string[]): CommandCall | undefined;
+  /** Raw chunks each channel received, in order. */
+  stdout: string[];
+  stderr: string[];
+  /** The human channel as text, escapes and all. */
+  humanOutput(): string;
+  /** Every machine line, parsed. Throws when stdout carries anything else. */
+  events(): Array<Record<string, unknown>>;
+  /** Move the monotonic clock — durations are asserted, so nothing may drift. */
+  advance(ms: number): void;
 }
 
 const matches = (argv: string[], tokens: string[]): boolean => {
@@ -134,10 +154,13 @@ export function fakeBoundary(options: FakeBoundaryOptions = {}): FakeBoundary {
     },
   };
 
+  let elapsed = 0;
+
   const runStub = (command: string, args: string[], opts: RunOptions): CommandResult => {
     calls.push({ command, args, options: opts });
     const argv = [command, ...args];
     const stub = options.commands?.find((c) => matches(argv, c.match));
+    elapsed += stub?.durationMs ?? 0;
     if (!stub) {
       const fallback = options.defaultCommandResult;
       if (fallback) {
@@ -158,15 +181,37 @@ export function fakeBoundary(options: FakeBoundaryOptions = {}): FakeBoundary {
     };
   };
 
-  const logs: string[] = [];
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  // The real reporter, on captured channels: its TTY and JSON behaviour is then
+  // tested as it ships rather than as a second implementation.
+  const report = createReporter({
+    out: (text) => stdout.push(text),
+    err: (text) => stderr.push(text),
+    elapsedMs: () => elapsed,
+    tty: options.tty ?? false,
+    json: options.json ?? false,
+  });
 
   return {
     calls,
     requests,
     writes,
     files,
+    stdout,
+    stderr,
     commandLines: () => calls.map((c) => [c.command, ...c.args].join(' ')),
     findCall: (...tokens: string[]) => calls.find((c) => matches([c.command, ...c.args], tokens)),
+    humanOutput: () => stderr.join(''),
+    events: () =>
+      stdout
+        .join('')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>),
+    advance: (ms: number) => {
+      elapsed += ms;
+    },
     exec: {
       run: async (command, args, opts = {}) => runStub(command, args, opts),
       runSync: (command, args, opts = {}) => runStub(command, args, opts),
@@ -192,14 +237,16 @@ export function fakeBoundary(options: FakeBoundaryOptions = {}): FakeBoundary {
     },
     env: (name) => options.env?.[name],
     now: () => options.now ?? 1_700_000_000,
+    elapsedMs: () => elapsed,
     homedir: () => options.homedir ?? '/home/dev',
     cwd: () => cwd,
     log: {
-      info: (m) => logs.push(m),
-      warn: (m) => logs.push(m),
-      error: (m) => logs.push(m),
-      step: (m) => logs.push(m),
+      info: (m) => report.note(m),
+      warn: (m) => report.warn(m),
+      error: (m) => report.warn(m),
+      step: (m) => report.note(m),
     },
+    report,
     interactive: options.interactive ?? false,
   };
 }

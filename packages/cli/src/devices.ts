@@ -96,6 +96,31 @@ export interface InstallTarget {
   name: string;
   /** Checked against a cached profile's device list before signing. */
   udid: string;
+  /** Attached by cable. A Wi-Fi install is minutes rather than seconds. */
+  cabled: boolean;
+}
+
+/** `DEV-A  iPhone A  [wired]`, for an error that has no header to point at. */
+const describe = (device: DevicectlDevice): string =>
+  `${nameOf(device)} [${transportLabel(device)}]`;
+
+/**
+ * The devices line of the header: who is getting this build, and whether any of
+ * them is on the slow path.
+ *
+ * Said out loud because a Wi-Fi install takes minutes rather than seconds, and a
+ * silent one reads as a hang.
+ */
+export function describeTargets(targets: InstallTarget[]): string {
+  const names = targets.map((target) => target.name).join(', ');
+  const overTheAir = targets.filter((target) => !target.cabled);
+  if (overTheAir.length === 0) return names;
+  const all = ['', 'both ', 'all '][Math.min(targets.length, 3) - 1]!;
+  const which =
+    overTheAir.length === targets.length
+      ? all
+      : `${overTheAir.map((target) => target.name).join(', ')} `;
+  return `${names}  (${which}over Wi-Fi — cable them for the fast loop)`;
 }
 
 /**
@@ -108,17 +133,11 @@ export interface InstallTarget {
  * so the Wi-Fi one gets dropped without a word and the "plug something in" hint
  * never fires. Rounds of device testing then go to a phone that never received
  * the build.
+ *
+ * Pure: it prints nothing. The caller renders the devices into the header it
+ * puts up before the build, and a failure here names the devices inline instead.
  */
-export function resolveTargets(
-  boundary: Boundary,
-  devices: DevicectlDevice[],
-  deviceFilter: string,
-): InstallTarget[] {
-  boundary.log.info('paired devices:');
-  for (const device of devices) {
-    boundary.log.info(`    ${idOf(device)}  ${nameOf(device)}  [${transportLabel(device)}]`);
-  }
-
+export function resolveTargets(devices: DevicectlDevice[], deviceFilter: string): InstallTarget[] {
   let selected: DevicectlDevice[];
   if (deviceFilter) {
     // Match any identifier a person might reach for.
@@ -130,7 +149,10 @@ export function resolveTargets(
         device.hardwareProperties?.serialNumber === deviceFilter,
     );
     if (selected.length === 0) {
-      fail(`--device ${deviceFilter} is not a paired device (see the list above)`);
+      fail(
+        `--device ${deviceFilter} is not a paired device.\n` +
+          `  Paired: ${devices.map(describe).join(', ') || '(none)'}`,
+      );
     }
     const [only] = selected;
     if (only && !isAvailable(only)) {
@@ -141,15 +163,8 @@ export function resolveTargets(
     if (selected.length === 0) {
       fail(
         "no paired device is reachable — plug one in, or join it to this Mac's Wi-Fi.\n" +
+          `  Paired: ${devices.map(describe).join(', ') || '(none)'}\n` +
           '  (`jetbridge ota` needs no device at all)',
-      );
-    }
-    const overTheAir = selected.filter((device) => !isCabled(device));
-    if (overTheAir.length > 0) {
-      // Said out loud: a Wi-Fi install takes minutes rather than seconds, and a
-      // silent one reads as a hang.
-      boundary.log.info(
-        `over Wi-Fi (slower): ${overTheAir.map(nameOf).join(', ')} — cable them for the fast loop`,
       );
     }
   }
@@ -157,5 +172,6 @@ export function resolveTargets(
     id: idOf(device),
     name: nameOf(device),
     udid: udidOf(device),
+    cabled: isCabled(device),
   }));
 }

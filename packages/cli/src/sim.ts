@@ -22,6 +22,7 @@ import {
 import { fail, type Project } from './project.js';
 import {
   bootSimulator,
+  describeSimulator,
   installApp,
   launchApp,
   listSimulators,
@@ -54,27 +55,57 @@ export async function simInstall(
     );
   }
 
+  const report = boundary.report;
   await requireToolchain(boundary, project, ['xcodebuild', 'xcrun']);
-  await generateProject(boundary, project);
-  await runHook(boundary, project, 'preBuild');
 
-  // Resolve and boot BEFORE the slow build: a simulator name nobody has fails in
-  // a second instead of after a minute of compiling, and the boot finishes while
-  // xcodebuild works.
-  const simulator = resolveSimulator(
-    boundary,
-    await listSimulators(boundary),
-    config,
-    options.device ?? '',
-  );
-  await bootSimulator(boundary, simulator);
+  // Resolve BEFORE the slow build: a simulator name nobody has fails in a second
+  // instead of after a minute of compiling.
+  const simulator = resolveSimulator(await listSimulators(boundary), config, options.device ?? '');
+  const bundleId = bundleIdFor(options.suffix, config);
+
+  report.start({
+    command: 'install',
+    data: {
+      destination: 'simulator',
+      bundleId,
+      displayName: options.displayName,
+      configuration,
+      suffix: options.suffix,
+    },
+    title: [options.displayName, bundleId, configuration],
+    labels: [simulator.name],
+    rows: [
+      {
+        label: 'simulator',
+        text: describeSimulator(simulator),
+        event: 'devices',
+        data: {
+          devices: [{ id: simulator.udid, name: simulator.name, transport: 'simulator' }],
+        },
+      },
+      {
+        label: 'signing',
+        text: 'none — a simulator validates no code signature',
+        event: 'signing',
+        data: { decision: 'none', profiles: [] },
+      },
+    ],
+  });
+
+  // The boot finishes while xcodebuild works, so it is started before the build
+  // and never waited on again.
+  await report.run('boot', 'booted', () => bootSimulator(boundary, simulator));
 
   const derivedData = derivedDataPath(boundary, options.suffix);
   if (options.clean) {
-    boundary.log.info('--clean: wiping DerivedData for a build from scratch');
-    boundary.fs.rm(derivedData, { recursive: true });
+    await report.run('clean', 'cleaned', async () => {
+      boundary.fs.rm(derivedData, { recursive: true });
+    });
   }
   boundary.fs.mkdirp(derivedData);
+
+  await generateProject(boundary, project);
+  await runHook(boundary, project, 'preBuild');
 
   const request = {
     configuration,
@@ -93,21 +124,19 @@ export async function simInstall(
   if (!boundary.fs.exists(appPath)) {
     fail(`the build reported success but produced no app at ${appPath}`);
   }
-  boundary.log.info(`built → ${appPath}`);
 
   await runHook(boundary, project, 'postBuild');
 
-  const bundleId = bundleIdFor(options.suffix, config);
-  boundary.log.step(`installing ${bundleId} → ${simulator.name}`);
-  await installApp(boundary, simulator, appPath);
-  await launchApp(boundary, simulator, bundleId);
+  await report.run('install', simulator.name, async (step) => {
+    step.data({ device: { id: simulator.udid, name: simulator.name }, bundleId, appPath });
+    await installApp(boundary, simulator, appPath);
+    await launchApp(boundary, simulator, bundleId);
+  });
 
-  boundary.log.info(
-    `installed + launched ${bundleId} ("${options.displayName}") → ${simulator.name}`,
-  );
   if (options.suffix && !localCredentials(boundary, config)) {
-    boundary.log.info(
-      'no App Store Connect credentials here — fine for a simulator, but `jetbridge wired` needs them.',
+    report.note(
+      'no App Store Connect credentials here — fine for a simulator, but a device install needs them.',
     );
   }
+  report.done(true, { devices: 1, bundleId, appPath });
 }

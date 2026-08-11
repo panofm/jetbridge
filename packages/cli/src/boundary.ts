@@ -23,6 +23,7 @@ import {
 } from 'node:fs';
 import { dirname } from 'node:path';
 import { fail } from './errors.js';
+import { createReporter, type Reporter } from './reporter.js';
 
 export interface RunOptions {
   cwd?: string;
@@ -79,11 +80,16 @@ export interface FileSystem {
   size(path: string): number;
 }
 
+/**
+ * Plain messages from deep inside a step — one line per profile provisioned,
+ * per file patched. Every one of them goes through the reporter, which indents
+ * them under the step that produced them; written straight to stderr they would
+ * land ON the step's own half-drawn line.
+ */
 export interface Logger {
   info(message: string): void;
   warn(message: string): void;
   error(message: string): void;
-  /** Progress that is noise in a log file — suppressed when not a TTY. */
   step(message: string): void;
 }
 
@@ -97,9 +103,18 @@ export interface Boundary {
   env(name: string): string | undefined;
   /** Unix seconds. Injected because build numbers are derived from it. */
   now(): number;
+  /**
+   * Monotonic milliseconds since this process started — every duration the tool
+   * reports is a difference of two readings. Separate from `now` on purpose: a
+   * wall clock is what an NTP correction moves, and a build that appears to take
+   * minus four seconds is worse than no timing at all.
+   */
+  elapsedMs(): number;
   homedir(): string;
   cwd(): string;
   log: Logger;
+  /** Progress, timing and machine events. See `reporter.ts` for the two channels. */
+  report: Reporter;
   /** False behind a pipe or in CI: never prompt, never expect a terminal. */
   interactive: boolean;
 }
@@ -182,16 +197,36 @@ function childStreams(
   };
 }
 
+/**
+ * The real reporter: human lines on stderr, machine events on stdout, and line
+ * rewriting only where stderr is a terminal that can redraw them.
+ */
+export function nodeReporter(options: { json?: boolean } = {}): Reporter {
+  return createReporter({
+    out: (text) => void process.stdout.write(text),
+    err: (text) => void process.stderr.write(text),
+    elapsedMs: () => performance.now(),
+    tty: Boolean(process.stderr.isTTY),
+    json: Boolean(options.json),
+  });
+}
+
 export interface NodeBoundaryOptions {
   /**
    * Force the unattended path even on a terminal — what `--non-interactive`
    * hands down. Never needed behind a pipe, which is already unattended.
    */
   nonInteractive?: boolean;
+  /** The CLI builds one before parsing, so a failure has somewhere to go. */
+  reporter?: Reporter;
 }
 
 export function nodeBoundary(options: NodeBoundaryOptions = {}): Boundary {
-  const interactive = isInteractive() && options.nonInteractive !== true;
+  const report = options.reporter ?? nodeReporter();
+  // `--json` is unattended by definition: a caller asking for machine output is
+  // a machine. Without this a prompt would draw its frames on stdout, which is
+  // the one stream that has to stay parseable.
+  const interactive = isInteractive() && options.nonInteractive !== true && !report.json;
   return {
     exec: {
       async run(command, args, runOptions = {}) {
@@ -253,15 +288,15 @@ export function nodeBoundary(options: NodeBoundaryOptions = {}): Boundary {
     },
     env: (name) => process.env[name],
     now: () => Math.floor(Date.now() / 1000),
+    elapsedMs: () => performance.now(),
     homedir: () => process.env.HOME ?? '',
     cwd: () => process.cwd(),
+    report,
     log: {
-      info: (m) => console.error(m),
-      warn: (m) => console.error(m),
-      error: (m) => console.error(m),
-      step: (m) => {
-        if (interactive) console.error(m);
-      },
+      info: (m) => report.note(m),
+      warn: (m) => report.warn(m),
+      error: (m) => report.warn(m),
+      step: (m) => report.note(m),
     },
     interactive,
   };

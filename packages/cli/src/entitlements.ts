@@ -117,7 +117,6 @@ export async function withEntitlementSwap<T>(
   const restore = (): void => {
     if (!swapped) return;
     swapped = false;
-    boundary.log.info('restoring the project file (variant entitlement swap)');
     boundary.fs.write(path, boundary.fs.read(options.backupPath));
   };
 
@@ -136,9 +135,12 @@ export async function withEntitlementSwap<T>(
 
   try {
     boundary.fs.write(options.backupPath, boundary.fs.read(path));
-    boundary.log.step('patching the project file → reduced variant entitlements');
-    applySwap(boundary, project);
-    swapped = true;
+    // A step of its own rather than a bare line between two: the swap is a real
+    // edit to the working tree, and it belongs in the run's own column.
+    await boundary.report.run('entitlements', 'patched entitlements', async () => {
+      applySwap(boundary, project);
+      swapped = true;
+    });
     return await body();
   } finally {
     restore();

@@ -297,7 +297,9 @@ describe('runHook', () => {
     expect(call.command).toBe('/bin/sh');
     expect(call.args).toEqual(['-c', 'npm run codegen && echo done']);
     expect(call.options.cwd).toBe('/w');
-    expect(call.options.stdio).toBe('inherit');
+    // Captured, not inherited: a hook that prints lands between a step's line
+    // and its duration, and its own banner repeats the one the runner drew.
+    expect(call.options.stdio).toBeUndefined();
   });
 
   it('runs the postBuild hook, not the preBuild one', async () => {

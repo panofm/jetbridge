@@ -8,7 +8,7 @@ One config file, one command per destination, and no service in the middle: the 
 npm install --save-dev jetbridge
 ```
 
-**Contents** — [Quick start](#quick-start) · [Commands](#commands) · [Variants](#variants) · [Configuration](#configuration) · [Credentials](#credentials) · [Unattended runs](#unattended-runs) · [Guides](#guides)
+**Contents** — [Quick start](#quick-start) · [Commands](#commands) · [Variants](#variants) · [Configuration](#configuration) · [Credentials](#credentials) · [Unattended runs](#unattended-runs) · [JSON output](#json-output) · [Guides](#guides)
 
 ## Quick start
 
@@ -118,6 +118,32 @@ jetbridge init --yes --scheme Acme --team-id ABCDE12345 | cat
 ```
 
 `--yes` supplies consent: to writing the config, and to a deletion in `bundles rm` / `bundles prune`. If you are on a terminal and want the unattended path anyway, `CI=1` and `JETBRIDGE_NON_INTERACTIVE=1` both force it — neither is ever required.
+
+## JSON output
+
+Every command takes `--json`. Machine output goes to **stdout**, one JSON object per line; every human line goes to **stderr**. So a script parses stdout while a person still watches the run.
+
+```sh
+jetbridge install --device --json | jq -c 'select(.event == "step" and .phase == "end")'
+```
+
+```jsonc
+{"event":"start","command":"install","destination":"device","bundleId":"io.acme.app.dev.wave","displayName":"Acme Wave","configuration":"Debug","suffix":"wave"}
+{"event":"devices","devices":[{"id":"10BFE051","name":"Dev's 17 Pro","udid":"…","transport":"wired"}]}
+{"event":"signing","decision":"cached","profiles":["Acme wave app","Acme wave uploadwidget"]}
+{"event":"step","step":"build","phase":"start"}
+{"event":"step","step":"build","phase":"end","ok":true,"durationMs":72000,"buildNumber":"1786437647","configuration":"Debug"}
+{"event":"step","step":"install","phase":"end","ok":true,"durationMs":18000,"device":{"id":"10BFE051","name":"Dev's 17 Pro"},"bundleId":"io.acme.app.dev.wave"}
+{"event":"done","ok":true,"durationMs":113000,"devices":1,"bundleId":"io.acme.app.dev.wave"}
+```
+
+Every object has an `event`. `start` names the run, `devices` and `signing` carry the header facts, each `step` appears twice (`phase` `start` then `end`, the second with `durationMs` and `ok`), and `done` closes the stream with `ok` and the total. `jetbridge link` adds `link`, with the install, index and manifest URLs. A failure emits `error` with the message, then `done` with `"ok":false`, and the exit code is non-zero — so a reader can loop until `done` and never hang.
+
+Every command opens with `start` and closes with `done`, so a reader can loop until `done` and never hang. `init` and `reindex` carry no header rows and add one event of their own (`init`, `reindex`) before closing.
+
+`bundles ls --json` is the one exception: it prints a single array of variants, the shape it always had, and nothing else — no `start`, no `done`. Read it with `JSON.parse` on the whole stream, not line by line.
+
+Without `--json`, stdout carries only a command's own payload (the `bundles ls` table); the progress you read while it runs is stderr either way. On a terminal a step rewrites its own line as it finishes; redirected to a file, each step prints one plain line and no escape codes.
 
 ## Guides
 

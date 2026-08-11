@@ -376,6 +376,25 @@ describe.skipIf(!built)('the built CLI', { timeout: SPAWN_BUDGET_MS }, () => {
     expect(result.stderr).not.toContain('JetbridgeError');
   });
 
+  it('puts nothing but JSON on stdout with --json, even when the run fails', async () => {
+    // The whole contract in one command: a caller pipes stdout to a parser and
+    // a person reads stderr, and a failure does not put prose in the parser.
+    const result = await cli('install', '--json');
+    expect(result.code).toBe(1);
+    const lines = result.stdout.split('\n').filter(Boolean);
+    expect(lines.map((line) => (JSON.parse(line) as { event: string }).event)).toEqual([
+      'error',
+      'done',
+    ]);
+    expect(JSON.parse(lines[1]!)).toMatchObject({ event: 'done', ok: false });
+    expect(result.stderr).toContain('no jetbridge.config.json found');
+  });
+
+  it('takes --json before the command as well as after it', async () => {
+    const result = await cli('--json', 'install');
+    expect(result.stdout.split('\n').filter(Boolean)).toHaveLength(2);
+  });
+
   it('honours --config-file from a subcommand, and names the file it could not find', async () => {
     const result = await cli('--config-file', '/nowhere/jetbridge.config.json', 'install');
     expect(result.code).toBe(1);

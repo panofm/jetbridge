@@ -120,15 +120,23 @@ export async function requireToolchain(
 /** Regenerate the project from its spec, when the config says it is generated. */
 export async function generateProject(boundary: Boundary, project: Project): Promise<void> {
   if (!project.config.project.xcodegen) return;
-  boundary.log.step('regenerating the Xcode project');
-  const result = await boundary.exec.run('xcodegen', ['generate'], {
-    cwd: project.iosPath(),
-    allowFail: true,
+  await boundary.report.run('xcodegen', 'generated project', async () => {
+    const result = await boundary.exec.run('xcodegen', ['generate'], {
+      cwd: project.iosPath(),
+      allowFail: true,
+    });
+    if (!result.ok) fail(`xcodegen failed:\n${(result.stderr || result.stdout).trim()}`);
   });
-  if (!result.ok) fail(`xcodegen failed:\n${(result.stderr || result.stdout).trim()}`);
 }
 
-/** Run a configured shell hook in the project root. */
+/**
+ * Run a configured shell hook in the project root.
+ *
+ * Its output is captured rather than inherited: a hook that announces itself
+ * printed its own name straight after the runner printed it, and anything it
+ * wrote mid-step landed between a step's line and its duration. On a failure
+ * the tail is quoted, which is the only part anybody reads.
+ */
 export async function runHook(
   boundary: Boundary,
   project: Project,
@@ -136,14 +144,27 @@ export async function runHook(
 ): Promise<void> {
   const command = project.config.hooks[which];
   if (!command) return;
-  boundary.log.step(`${which}: ${command}`);
-  const result = await boundary.exec.run('/bin/sh', ['-c', command], {
-    cwd: project.root,
-    stdio: 'inherit',
-    allowFail: true,
+  await boundary.report.run('hook', which, async (step) => {
+    step.data({ hook: which, command });
+    const result = await boundary.exec.run('/bin/sh', ['-c', command], {
+      cwd: project.root,
+      allowFail: true,
+    });
+    if (!result.ok) {
+      const tail = (result.stderr || result.stdout).trim().split('\n').slice(-20).join('\n');
+      fail(
+        `the ${which} hook failed (exit ${result.code}): ${command}` + (tail ? `\n${tail}` : ''),
+      );
+    }
   });
-  if (!result.ok) fail(`the ${which} hook failed (exit ${result.code}): ${command}`);
 }
+
+/**
+ * The build number is a bare epoch and looks like nothing, so the line that
+ * reports it says where the same number appears on the phone.
+ */
+export const buildNumberDetail = (buildNumber: string): string =>
+  `build ${buildNumber} (shown in Settings › App Info)`;
 
 export async function build(
   boundary: Boundary,
@@ -151,17 +172,18 @@ export async function build(
   request: BuildRequest,
 ): Promise<CommandResult> {
   const args = buildArgs(boundary, project, request);
-  boundary.log.step(
-    `building ${request.configuration}/${project.config.project.scheme} (build ${request.buildNumber})`,
-  );
-  const result = await boundary.exec.run('xcodebuild', args, {
-    cwd: project.root,
-    allowFail: true,
+  return boundary.report.run('build', 'built', async (step) => {
+    step.detail(buildNumberDetail(request.buildNumber));
+    step.data({ buildNumber: request.buildNumber, configuration: request.configuration });
+    const result = await boundary.exec.run('xcodebuild', args, {
+      cwd: project.root,
+      allowFail: true,
+    });
+    if (!result.ok) {
+      // xcodebuild's useful lines are at the end; the first hundred are noise.
+      const tail = (result.stderr || result.stdout).trim().split('\n').slice(-20).join('\n');
+      fail(`xcodebuild failed:\n${tail}`);
+    }
+    return result;
   });
-  if (!result.ok) {
-    // xcodebuild's useful lines are at the end; the first hundred are noise.
-    const tail = (result.stderr || result.stdout).trim().split('\n').slice(-20).join('\n');
-    fail(`xcodebuild failed:\n${tail}`);
-  }
-  return result;
 }

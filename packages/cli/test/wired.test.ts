@@ -32,18 +32,6 @@ const device = (id: string, name: string, transport = 'wired'): DevicectlDevice 
   connectionProperties: { transportType: transport, pairingState: 'paired' },
 });
 
-/** The fake keeps its log lines private, so tests that read them swap in their own. */
-function captureLogs(boundary: FakeBoundary): string[] {
-  const lines: string[] = [];
-  boundary.log = {
-    info: (m) => lines.push(m),
-    warn: (m) => lines.push(m),
-    error: (m) => lines.push(m),
-    step: (m) => lines.push(m),
-  };
-  return lines;
-}
-
 /**
  * Emulate the side effects the real tools have on the filesystem. Without this
  * `wiredInstall` wipes the scratch directory before `pairedDevices` reads it,
@@ -285,19 +273,18 @@ describe('install', () => {
 });
 
 describe('a successful run', () => {
-  it('names the bundle id, the label and the device count', async () => {
+  it('heads the run with the label, the bundle id and the configuration', async () => {
     const boundary = boundaryFor([device('DEV-A', 'iPhone A')]);
-    const logs = captureLogs(boundary);
     await wiredInstall(boundary, project, plain);
-    expect(logs).toContain('installed io.acme.app.dev ("Acme Dev") → iPhone A');
-    expect(logs).toContain('done — 1 device(s), io.acme.app.dev ("Acme Dev")');
+    expect(boundary.humanOutput()).toContain('Acme Dev  ·  io.acme.app.dev  ·  Debug');
   });
 
-  it('reports where the app was built', async () => {
+  it('names each device as its own step, and closes with a total', async () => {
     const boundary = boundaryFor([device('DEV-A', 'iPhone A')]);
-    const logs = captureLogs(boundary);
     await wiredInstall(boundary, project, plain);
-    expect(logs).toContain(`built → ${APP_PATH}`);
+    const printed = boundary.humanOutput();
+    expect(printed).toMatch(/✓ iPhone A/);
+    expect(printed).toMatch(/done in /);
   });
 
   it('runs the configured hooks around the build', async () => {
@@ -439,11 +426,16 @@ describe('a variant run against cached profiles', () => {
     expect(boundary.fs.read(PBXPROJ)).toBe(CLEAN_PBXPROJ);
   });
 
-  it('installs the variant bundle id', async () => {
+  it('installs the variant bundle id, and says so before the build', async () => {
     const boundary = variantBoundary();
-    const logs = captureLogs(boundary);
     await wiredInstall(boundary, variantProject, variantOptions);
     expect(boundary.findCall('devicectl', 'device', 'install')!.args).toContain(VARIANT_APP);
-    expect(logs).toContain('done — 1 device(s), io.acme.app.dev.wave ("Acme Wave")');
+    expect(boundary.humanOutput()).toContain('Acme Wave  ·  io.acme.app.dev.wave  ·  Debug');
+  });
+
+  it('names the profiles it reused, so a cache hit is not a guess', async () => {
+    const boundary = variantBoundary();
+    await wiredInstall(boundary, variantProject, variantOptions);
+    expect(boundary.humanOutput()).toContain('reusing Acme wave app (valid, covers 1 device(s))');
   });
 });

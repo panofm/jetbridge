@@ -149,7 +149,7 @@ describe('rejections', () => {
     expect(result.config.ota?.storage.prefix).toBe('builds');
     expect(result.config.ota?.maxBuilds).toBe(60);
     expect(result.config.ota?.access).toBe('path');
-    expect(result.config.ota?.exportMethod).toBe('ad-hoc');
+    expect(result.config.ota?.exportMethod).toBe('development');
   });
 
   it('rejects an unknown export method', () => {

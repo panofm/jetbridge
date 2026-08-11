@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  describeTargets,
   idOf,
   isAvailable,
   isCabled,
@@ -224,85 +225,93 @@ describe('pairedDevices', () => {
 
 describe('resolveTargets', () => {
   it('takes every reachable device when no filter is given', () => {
-    const boundary = fakeBoundary();
     const targets = resolveTargets(
-      boundary,
       [cabled(), overWifi(), device({ id: 'DEV-C', name: 'iPhone C' })],
       '',
     );
     expect(targets).toEqual([
-      { id: 'DEV-A', name: 'iPhone A', udid: 'UDID-A' },
-      { id: 'DEV-B', name: 'iPhone B', udid: 'UDID-B' },
+      { id: 'DEV-A', name: 'iPhone A', udid: 'UDID-A', cabled: true },
+      { id: 'DEV-B', name: 'iPhone B', udid: 'UDID-B', cabled: false },
     ]);
   });
 
   it('takes a Wi-Fi device even when another is cabled', () => {
     // A cabled-only filter would be satisfied by the cabled device and drop the
     // Wi-Fi one without a word.
-    const boundary = fakeBoundary();
-    const targets = resolveTargets(boundary, [cabled(), overWifi()], '');
+    const targets = resolveTargets([cabled(), overWifi()], '');
     expect(targets.map((t) => t.id)).toContain('DEV-B');
   });
 
-  it('lists every paired device with its transport', () => {
+  it('prints nothing at all — the caller renders the header', () => {
     const boundary = fakeBoundary();
     const logs = captureLogs(boundary);
-    resolveTargets(boundary, [cabled(), overWifi(), device({ id: 'DEV-C', name: 'iPhone C' })], '');
-    expect(logs).toContain('    DEV-A  iPhone A  [wired]');
-    expect(logs).toContain('    DEV-B  iPhone B  [Wi-Fi]');
-    expect(logs).toContain('    DEV-C  iPhone C  [unavailable]');
-  });
-
-  it('says out loud that a Wi-Fi install is slower', () => {
-    const boundary = fakeBoundary();
-    const logs = captureLogs(boundary);
-    resolveTargets(boundary, [cabled(), overWifi()], '');
-    expect(logs.join('\n')).toMatch(/over Wi-Fi \(slower\): iPhone B/);
-  });
-
-  it('stays quiet about Wi-Fi when every selected device is cabled', () => {
-    const boundary = fakeBoundary();
-    const logs = captureLogs(boundary);
-    resolveTargets(boundary, [cabled(), cabled({ id: 'DEV-A2', name: 'iPhone A2' })], '');
-    expect(logs.join('\n')).not.toMatch(/slower/);
+    resolveTargets([cabled(), overWifi()], '');
+    expect(logs).toEqual([]);
+    expect(boundary.humanOutput()).toBe('');
   });
 
   it('matches a filter against the identifier, name, UDID or serial', () => {
-    const boundary = fakeBoundary();
     const devices = [cabled({ serial: 'SERIAL-A' }), overWifi()];
     for (const filter of ['DEV-A', 'iPhone A', 'UDID-A', 'SERIAL-A']) {
-      expect(resolveTargets(boundary, devices, filter).map((t) => t.id)).toEqual(['DEV-A']);
+      expect(resolveTargets(devices, filter).map((t) => t.id)).toEqual(['DEV-A']);
     }
   });
 
-  it('points at the printed list when the filter matches nothing', () => {
-    const boundary = fakeBoundary();
-    expect(() => resolveTargets(boundary, [cabled()], 'iPhone Z')).toThrow(
-      /--device iPhone Z is not a paired device \(see the list above\)/,
+  it('names the paired devices when the filter matches nothing', () => {
+    expect(() => resolveTargets([cabled(), overWifi()], 'iPhone Z')).toThrow(
+      /--device iPhone Z is not a paired device\.\n {2}Paired: iPhone A \[wired\], iPhone B \[Wi-Fi\]/,
     );
   });
 
   it('says what to do when the named device has no transport', () => {
-    const boundary = fakeBoundary();
-    expect(() =>
-      resolveTargets(boundary, [device({ id: 'DEV-C', name: 'iPhone C' })], 'DEV-C'),
-    ).toThrow(/iPhone C is paired but has no transport — plug it in, or join it to Wi-Fi\./);
+    expect(() => resolveTargets([device({ id: 'DEV-C', name: 'iPhone C' })], 'DEV-C')).toThrow(
+      /iPhone C is paired but has no transport — plug it in, or join it to Wi-Fi\./,
+    );
   });
 
   it('fails when nothing at all is reachable', () => {
-    const boundary = fakeBoundary();
-    expect(() => resolveTargets(boundary, [device({ id: 'DEV-C', name: 'iPhone C' })], '')).toThrow(
+    expect(() => resolveTargets([device({ id: 'DEV-C', name: 'iPhone C' })], '')).toThrow(
       /no paired device is reachable/,
     );
   });
 
   it('mentions the OTA escape hatch when nothing is reachable', () => {
-    const boundary = fakeBoundary();
-    expect(() => resolveTargets(boundary, [], '')).toThrow(/jetbridge ota` needs no device at all/);
+    expect(() => resolveTargets([], '')).toThrow(/jetbridge ota` needs no device at all/);
   });
 
   it('carries the UDID through, because the signing cache checks it', () => {
-    const boundary = fakeBoundary();
-    expect(resolveTargets(boundary, [cabled()], '')[0]!.udid).toBe('UDID-A');
+    expect(resolveTargets([cabled()], '')[0]!.udid).toBe('UDID-A');
+  });
+});
+
+describe('describeTargets', () => {
+  const target = (name: string, cabled: boolean) => ({ id: name, name, udid: name, cabled });
+
+  it('is a bare list when every device is on a cable', () => {
+    expect(describeTargets([target('iPhone A', true), target('iPhone B', true)])).toBe(
+      'iPhone A, iPhone B',
+    );
+  });
+
+  it('says which devices are on the slow path', () => {
+    expect(describeTargets([target('iPhone A', true), target('iPhone B', false)])).toBe(
+      'iPhone A, iPhone B  (iPhone B over Wi-Fi — cable them for the fast loop)',
+    );
+  });
+
+  it('does not name them one by one when they are all on Wi-Fi', () => {
+    expect(describeTargets([target('iPhone A', false)])).toBe(
+      'iPhone A  (over Wi-Fi — cable them for the fast loop)',
+    );
+    expect(describeTargets([target('iPhone A', false), target('iPhone B', false)])).toBe(
+      'iPhone A, iPhone B  (both over Wi-Fi — cable them for the fast loop)',
+    );
+    expect(
+      describeTargets([
+        target('iPhone A', false),
+        target('iPhone B', false),
+        target('iPhone C', false),
+      ]),
+    ).toBe('iPhone A, iPhone B, iPhone C  (all over Wi-Fi — cable them for the fast loop)');
   });
 });

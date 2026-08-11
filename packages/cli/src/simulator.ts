@@ -88,7 +88,6 @@ const matchesProjectDeviceType = (simulator: Simulator, config: Config): boolean
  * that silently did nothing.
  */
 export function resolveSimulator(
-  boundary: Boundary,
   simulators: Simulator[],
   config: Config,
   wanted: string,
@@ -125,16 +124,18 @@ export function resolveSimulator(
         '  Add one in Xcode › Settings › Components, or name one with --device.',
     );
   }
-  boundary.log.info(
-    `simulator: ${chosen.name} (${chosen.udid})${isBooted(chosen) ? ' — already booted' : ''}`,
-  );
   return chosen;
 }
+
+/** The simulator row of the header — nothing is printed before it. */
+export const describeSimulator = (simulator: Simulator): string =>
+  `${simulator.name} (${simulator.udid})${isBooted(simulator) ? ' — already booted' : ''}`;
 
 /** Booting an already-booted simulator is success, not an error. */
 export async function bootSimulator(boundary: Boundary, simulator: Simulator): Promise<void> {
   if (isBooted(simulator)) return;
-  boundary.log.step(`booting ${simulator.name}`);
+  // No announcement here: the caller's step label already says "booted", and
+  // saying it twice is the duplication the step column exists to remove.
   const result = await boundary.exec.run('xcrun', ['simctl', 'boot', simulator.udid], {
     allowFail: true,
   });

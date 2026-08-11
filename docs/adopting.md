@@ -326,7 +326,15 @@ these could not be worked out from the project, and there is nobody to ask:
   project.teamId — pass --team-id
 ```
 
-Every other command — `install`, `link`, `reindex`, `bundles ls`, `bundles provision` — asks nothing at all. `bundles ls --json` is the one to read from a script; `ls` is the default subcommand, so a bare `jetbridge bundles` lists too.
+Every other command — `install`, `link`, `reindex`, `bundles ls`, `bundles provision` — asks nothing at all.
+
+Add `--json` to any command to read the result instead of the prose. Machine output goes to **stdout** and every human line to **stderr**, so one caller parses while a person watches:
+
+```sh
+jetbridge install --device --json 2>/dev/null | jq -c 'select(.event == "done")'
+```
+
+`bundles ls --json` is the exception: it prints one array, the shape it always had. `ls` is the default subcommand, so a bare `jetbridge bundles` lists too. The event stream is described in the README.
 
 Two more flags matter when a script has to be explicit rather than rely on the config:
 

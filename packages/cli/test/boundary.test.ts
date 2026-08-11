@@ -9,7 +9,13 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { isInteractive, nodeBoundary, nodeFileSystem, type FileSystem } from '../src/boundary.js';
+import {
+  isInteractive,
+  nodeBoundary,
+  nodeFileSystem,
+  nodeReporter,
+  type FileSystem,
+} from '../src/boundary.js';
 import { fakeBoundary } from './helpers/fake-boundary.js';
 
 const boundary = nodeBoundary();
@@ -159,6 +165,15 @@ describe('isInteractive', () => {
 
   it('treats an empty CI value as unset', () => {
     expect(withTty(true, () => isInteractive({ CI: '' }))).toBe(true);
+  });
+
+  it('is false whenever the reporter is in --json mode, terminal or not', () => {
+    // A caller asking for machine output is a machine. A prompt would draw its
+    // frames on stdout, which is the one stream that has to stay parseable.
+    expect(
+      withTty(true, () => nodeBoundary({ reporter: nodeReporter({ json: true }) }).interactive),
+    ).toBe(false);
+    expect(withTty(true, () => nodeBoundary().interactive)).toBe(true);
   });
 });
 

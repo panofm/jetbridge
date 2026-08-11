@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   bootSimulator,
+  describeSimulator,
   installApp,
   isBooted,
   launchApp,
@@ -105,19 +106,19 @@ describe('resolveSimulator', () => {
   it('resolves by name', async () => {
     const boundary = listing();
     const simulators = await listSimulators(boundary);
-    expect(resolveSimulator(boundary, simulators, config, 'iPhone 16').udid).toBe('UDID-BOOTED');
+    expect(resolveSimulator(simulators, config, 'iPhone 16').udid).toBe('UDID-BOOTED');
   });
 
   it('resolves by udid', async () => {
     const boundary = listing();
     const simulators = await listSimulators(boundary);
-    expect(resolveSimulator(boundary, simulators, config, 'UDID-PHONE').name).toBe('iPhone 17 Pro');
+    expect(resolveSimulator(simulators, config, 'UDID-PHONE').name).toBe('iPhone 17 Pro');
   });
 
   it('lists what is available when the name does not exist', async () => {
     const boundary = listing();
     const simulators = await listSimulators(boundary);
-    expect(() => resolveSimulator(boundary, simulators, config, 'iPhone 99')).toThrow(
+    expect(() => resolveSimulator(simulators, config, 'iPhone 99')).toThrow(
       /is not an available simulator name or udid[\s\S]*iPhone 17 Pro/,
     );
   });
@@ -125,7 +126,7 @@ describe('resolveSimulator', () => {
   it('refuses a udid whose runtime is not installed', async () => {
     const boundary = listing();
     const simulators = await listSimulators(boundary);
-    expect(() => resolveSimulator(boundary, simulators, config, 'UDID-OLD')).toThrow(
+    expect(() => resolveSimulator(simulators, config, 'UDID-OLD')).toThrow(
       /runtime is not installed/,
     );
   });
@@ -134,33 +135,43 @@ describe('resolveSimulator', () => {
     const boundary = listing();
     const simulators = await listSimulators(boundary);
     // The iPad is booted first in the listing, but this project targets iPhone.
-    expect(resolveSimulator(boundary, simulators, config, '').udid).toBe('UDID-BOOTED');
+    expect(resolveSimulator(simulators, config, '').udid).toBe('UDID-BOOTED');
   });
 
   it('falls back to the first available one when none is booted', async () => {
     const boundary = listing();
     const simulators = (await listSimulators(boundary)).map((s) => ({ ...s, state: 'Shutdown' }));
-    expect(resolveSimulator(boundary, simulators, config, '').udid).toBe('UDID-PHONE');
+    expect(resolveSimulator(simulators, config, '').udid).toBe('UDID-PHONE');
   });
 
-  it('says which simulator it chose', async () => {
+  it('prints nothing at all — the caller renders the header', async () => {
+    // Printed here, the choice landed ABOVE the header, which exists to carry
+    // exactly this fact before anything slow starts.
     const boundary = listing();
-    const messages: string[] = [];
-    boundary.log.info = (m) => messages.push(m);
-    resolveSimulator(boundary, await listSimulators(boundary), config, '');
-    expect(messages.join('\n')).toContain('iPhone 16 (UDID-BOOTED)');
+    resolveSimulator(await listSimulators(boundary), config, '');
+    expect(boundary.humanOutput()).toBe('');
+  });
+
+  it('describes the chosen simulator for the header, booted state and all', async () => {
+    const boundary = listing();
+    const simulators = await listSimulators(boundary);
+    expect(describeSimulator(resolveSimulator(simulators, config, ''))).toBe(
+      'iPhone 16 (UDID-BOOTED) — already booted',
+    );
+    expect(describeSimulator(resolveSimulator(simulators, config, 'UDID-PHONE'))).toBe(
+      'iPhone 17 Pro (UDID-PHONE)',
+    );
   });
 
   it('honours the project device types', async () => {
     const boundary = listing();
     const simulators = await listSimulators(boundary);
     const iPadOnly = testConfig({ project: { deviceTypes: ['iPad'] } });
-    expect(resolveSimulator(boundary, simulators, iPadOnly, '').udid).toBe('UDID-PAD');
+    expect(resolveSimulator(simulators, iPadOnly, '').udid).toBe('UDID-PAD');
   });
 
   it('says what to do when nothing is installed', () => {
-    const boundary = fakeBoundary();
-    expect(() => resolveSimulator(boundary, [], config, '')).toThrow(
+    expect(() => resolveSimulator([], config, '')).toThrow(
       /no available iPhone simulator is installed/,
     );
   });

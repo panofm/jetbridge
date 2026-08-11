@@ -91,6 +91,7 @@ interface AccountOptions {
   requests?: StubbedRequest[];
   commands?: StubbedCommand[];
   bundleIds?: RegisteredBundleId[];
+  json?: boolean;
 }
 
 /** A boundary with credentials and a stocked account behind the ASC endpoints. */
@@ -98,6 +99,7 @@ function accountBoundary(options: AccountOptions = {}): FakeBoundary {
   return fakeBoundary({
     homedir: '/home/dev',
     cwd: '/w',
+    json: options.json ?? false,
     env: { ASC_API_KEY_ID: 'KEY1', ASC_API_ISSUER_ID: 'ISSUER1' },
     files: { '/home/dev/.appstoreconnect/private_keys/AuthKey_KEY1.p8': KEY_PEM },
     commands: options.commands ?? [],
@@ -273,15 +275,13 @@ describe('toRecords', () => {
 
 describe('listBundles', () => {
   it('returns the table and writes it to stdout', async () => {
-    const out = vi.spyOn(console, 'log').mockImplementation(() => {});
     const boundary = accountBoundary();
     const output = await listBundles(boundary, project);
     expect(output).toContain('io.acme.app.dev.wave');
-    expect(out).toHaveBeenCalledWith(output);
+    expect(boundary.stdout.join('')).toBe(`${output}\n`);
   });
 
   it('emits parseable JSON with --json', async () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
     const boundary = accountBoundary();
     const parsed = JSON.parse(await listBundles(boundary, project, { json: true })) as Array<{
       slug: string;
@@ -290,22 +290,20 @@ describe('listBundles', () => {
   });
 
   it('writes the JSON and nothing else to stdout, so a pipe stays parseable', async () => {
-    const out = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const boundary = accountBoundary();
+    // Not even the run's own events: this payload predates them and scripts
+    // parse the whole stream as one array.
+    const boundary = accountBoundary({ json: true });
     const output = await listBundles(boundary, project, { json: true });
-    // One stray log anywhere downstream is exactly what breaks `| jq`.
-    expect(out).toHaveBeenCalledTimes(1);
-    expect(out).toHaveBeenCalledWith(output);
+    expect(boundary.stdout.join('')).toBe(`${output}\n`);
+    expect(JSON.parse(boundary.stdout.join(''))).toHaveLength(2);
   });
 
   it('emits an empty array rather than prose when there is nothing', async () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
     const boundary = accountBoundary({ bundleIds: [ACCOUNT_BUNDLE_IDS[0]!] });
     expect(await listBundles(boundary, project, { json: true })).toBe('[]');
   });
 
   it('never deletes anything', async () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
     const boundary = accountBoundary();
     await listBundles(boundary, project);
     expect(deletePaths(boundary)).toEqual([]);
@@ -326,11 +324,8 @@ describe('removeBundles', () => {
 
   it('prints the plan and says how to execute it', async () => {
     const boundary = accountBoundary();
-    const messages: string[] = [];
-    boundary.log.info = (m) => messages.push(m);
-    boundary.log.warn = (m) => messages.push(m);
     await removeBundles(boundary, project, { suffixes: ['wave'] });
-    const printed = messages.join('\n');
+    const printed = boundary.humanOutput();
     expect(printed).toContain('io.acme.app.dev.wave');
     expect(printed).toContain('io.acme.app.dev.wave.uploadwidget');
     expect(printed).toContain('profile: Acme wave app');
@@ -524,10 +519,8 @@ describe('pruneBundles', () => {
 
   it('says why each one is stale, and how many were kept', async () => {
     const boundary = withBranches(['main', 'seededfeed']);
-    const messages: string[] = [];
-    boundary.log.info = (m) => messages.push(m);
     await pruneBundles(boundary, project, { yes: true });
-    const printed = messages.join('\n');
+    const printed = boundary.humanOutput();
     expect(printed).toContain('no branch on the remote maps to this slug');
     expect(printed).toContain('2 variant(s) registered, 1 with a branch still on the remote.');
   });
@@ -541,10 +534,8 @@ describe('pruneBundles', () => {
 
   it('succeeds quietly when nothing is stale', async () => {
     const boundary = withBranches(['main', 'wave', 'seededfeed']);
-    const messages: string[] = [];
-    boundary.log.info = (m) => messages.push(m);
     await expect(pruneBundles(boundary, project)).resolves.toEqual({ slugs: [], dryRun: false });
-    expect(messages.join('\n')).toContain('nothing to prune');
+    expect(boundary.humanOutput()).toContain('nothing to prune');
   });
 
   it('deletes NOTHING when the remote is unreachable', async () => {

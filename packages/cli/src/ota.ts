@@ -674,7 +674,7 @@ export async function otaInstall(
   // Ad hoc profiles, not development ones: a development profile signs an app
   // that installs down a cable and refuses to install over the air.
   const profiles: SigningProfiles = options.suffix
-    ? await report.run('provision', 'profiles', async (step) => {
+    ? await report.run('provision', 'provisioned', async (step) => {
         const provisioned = await provisionVariant(boundary, project, {
           suffix: options.suffix,
           displayName: options.displayName,
@@ -822,7 +822,7 @@ export async function publish(
 
   // Last, and never earlier: a printed URL that 403s costs a build cycle to
   // diagnose from the phone, where the only symptom is "Cannot connect".
-  await boundary.report.run('verify', 'reachable', () =>
+  await boundary.report.run('verify', 'verified', () =>
     verifyReachable(boundary, ota, manifestUrl),
   );
 
