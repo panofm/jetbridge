@@ -170,10 +170,26 @@ describe('isInteractive', () => {
   it('is false whenever the reporter is in --json mode, terminal or not', () => {
     // A caller asking for machine output is a machine. A prompt would draw its
     // frames on stdout, which is the one stream that has to stay parseable.
+    //
+    // `nodeBoundary` reads the real environment, and a CI runner sets CI=1 —
+    // so the control case has to clear it, or this asserts the runner's
+    // environment rather than the behaviour.
+    const withoutCi = <T>(body: () => T): T => {
+      const previous = process.env.CI;
+      delete process.env.CI;
+      try {
+        return body();
+      } finally {
+        if (previous !== undefined) process.env.CI = previous;
+      }
+    };
+
     expect(
-      withTty(true, () => nodeBoundary({ reporter: nodeReporter({ json: true }) }).interactive),
+      withTty(true, () =>
+        withoutCi(() => nodeBoundary({ reporter: nodeReporter({ json: true }) }).interactive),
+      ),
     ).toBe(false);
-    expect(withTty(true, () => nodeBoundary().interactive)).toBe(true);
+    expect(withTty(true, () => withoutCi(() => nodeBoundary().interactive))).toBe(true);
   });
 });
 
