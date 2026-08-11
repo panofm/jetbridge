@@ -10,7 +10,13 @@
 import { execFileSync } from 'node:child_process';
 
 /** Everything that ends up inside the published tarball. */
-const PUBLISHED_PATHS = ['src', 'templates', 'schema', 'package.json', 'README.md'];
+const PUBLISHED_PATHS = [
+  'packages/cli/src',
+  'packages/cli/templates',
+  'packages/cli/schema',
+  'packages/cli/package.json',
+  'packages/cli/README.md',
+];
 
 const BASE_REF = process.env.CHANGESET_BASE_REF ?? 'origin/main';
 

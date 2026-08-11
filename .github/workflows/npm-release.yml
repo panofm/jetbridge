@@ -22,8 +22,8 @@ on:
     branches: [main]
     paths:
       - '.changeset/**'
-      - 'package.json'
-      - 'CHANGELOG.md'
+      - 'packages/cli/package.json'
+      - 'packages/cli/CHANGELOG.md'
   workflow_dispatch:
 
 concurrency:
@@ -46,20 +46,25 @@ jobs:
         with:
           fetch-depth: 0 # changesets needs full history and tags
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # setup-node is here for the .npmrc it writes, which is what the publish
+      # authenticates with.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
           registry-url: https://registry.npmjs.org
 
-      - run: npm ci
+      - run: bun install --frozen-lockfile
 
       - name: Version PR or publish
         id: changesets
         uses: changesets/action@v1
         with:
-          version: npm run version-packages
-          publish: npm run release
+          version: bun run version-packages
+          publish: bun run release
           commit: 'chore(release): version packages'
           title: 'chore(release): version packages'
         env:

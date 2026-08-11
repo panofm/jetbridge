@@ -14,7 +14,7 @@ const nodeGlobals = {
 };
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**', 'fixtures/**'] },
+  { ignores: ['**/dist/**', '**/coverage/**', '**/fixtures/**', '**/node_modules/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   { languageOptions: { globals: nodeGlobals } },

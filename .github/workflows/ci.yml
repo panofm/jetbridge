@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  # One job, not five. A job bills a whole minute even when the script takes
+  # One job, not six. A job bills a whole minute even when the script takes
   # eight seconds, so splitting these checks apart costs money before any of
   # them does work.
   check:
@@ -15,26 +15,35 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # the changeset guard diffs against the base branch
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # The workspace is managed with Bun; the package it publishes targets
+      # Node, so the tests run under Node to prove that is still true.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+
+      - run: bun install --frozen-lockfile
+
       - name: No private identifiers
-        run: node scripts/check-no-private-identifiers.mjs
+        run: bun scripts/check-no-private-identifiers.mjs
+
       - name: Publishable changes carry a changeset
         if: github.event_name == 'pull_request'
         run: |
           git fetch origin ${{ github.base_ref }} --depth=0
-          CHANGESET_BASE_REF=origin/${{ github.base_ref }} node scripts/check-changeset.mjs
-      - run: npx tsc --noEmit
-      - run: npx eslint .
-      - run: npx prettier --check .
-      - name: Schema matches the code that generates it
-        run: npm run check:schema
+          CHANGESET_BASE_REF=origin/${{ github.base_ref }} bun scripts/check-changeset.mjs
+
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run format:check
+      - run: bun run check:schema
+
       # Before the tests, not after: some tests drive the built CLI as a
       # subprocess, and against a stale dist/ they would pass while testing
       # yesterday's binary.
-      - name: Build the package
-        run: npm run build
-      - run: npx vitest run
+      - run: bun run build
+      - run: bun run test

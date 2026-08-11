@@ -1,3 +1,5 @@
-dist/
-coverage/
-fixtures/*.json
+**/dist/
+**/coverage/
+**/fixtures/*.json
+**/node_modules/
+bun.lock

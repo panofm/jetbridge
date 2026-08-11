@@ -282,7 +282,15 @@ async function cli(...args: string[]): Promise<CliResult> {
   }
 }
 
-describe.skipIf(!built)('the built CLI', () => {
+/**
+ * Each of these spawns at least one real Node process, and some spawn one per
+ * command. The default 5s budget is fine on an idle machine and flakes on a
+ * busy one — a timeout here would read as a CLI bug rather than a loaded CI
+ * runner.
+ */
+const SPAWN_BUDGET_MS = 30_000;
+
+describe.skipIf(!built)('the built CLI', { timeout: SPAWN_BUDGET_MS }, () => {
   it('lists every command in the root help', async () => {
     const result = await cli('--help');
     expect(result.code).toBe(0);
