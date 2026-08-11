@@ -12,6 +12,11 @@ jetbridge ota              # archive, upload, print an install URL
 jetbridge clean            # remove variant bundle ids from your developer account
 ```
 
+## Documentation
+
+- [Adopting jetbridge](docs/adopting.md) — taking an existing app from nothing to a working variant install: what `init` infers, the xcconfig wiring, reduced variant entitlements, extensions.
+- [Troubleshooting](docs/troubleshooting.md) — organised by the symptom you see, because the visible error rarely names the cause.
+
 ## Variants: two branches, two apps
 
 The problem this solves: two people (or two branches) installing dev builds overwrite each other, because both builds carry the same bundle id. A variant gives a branch its own bundle id and its own home-screen label, so both apps sit side by side and stay distinguishable.
