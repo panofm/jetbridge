@@ -4,5 +4,5 @@
   "initialVersions": {
     "jetbridge": "0.0.0"
   },
-  "changesets": ["cold-pandas-argue", "renamed-command-surface"]
+  "changesets": ["adhoc-certificate", "cold-pandas-argue", "env-files", "timed-steps-and-json"]
 }
