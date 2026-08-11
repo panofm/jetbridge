@@ -1,0 +1,34 @@
+{
+  "name": "jetbridge-repo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "bun run --filter jetbridge build",
+    "test": "bun run --filter jetbridge test",
+    "typecheck": "bun run --filter jetbridge typecheck",
+    "schema": "bun run --filter jetbridge schema",
+    "check:schema": "bun run --filter jetbridge check:schema",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check:identifiers": "bun scripts/check-no-private-identifiers.mjs",
+    "check:changeset": "bun scripts/check-changeset.mjs",
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun run check:identifiers && bun run check:schema && bun run test",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "bun run build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "^0.7.0",
+    "@changesets/cli": "^2.31.0",
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0"
+  }
+}

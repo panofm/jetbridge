@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "configVersion": {
+      "const": 1,
+      "type": "number"
+    },
+    "configurations": {
+      "default": {},
+      "properties": {
+        "archive": {
+          "default": "Release",
+          "minLength": 1,
+          "type": "string"
+        },
+        "sim": {
+          "default": "Debug",
+          "minLength": 1,
+          "type": "string"
+        },
+        "wired": {
+          "default": "Debug",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "credentials": {
+      "default": {},
+      "properties": {
+        "ascIssuerId": {
+          "default": "${ASC_API_ISSUER_ID}",
+          "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$",
+          "type": "string"
+        },
+        "ascKeyId": {
+          "default": "${ASC_API_KEY_ID}",
+          "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$",
+          "type": "string"
+        },
+        "ascKeyPath": {
+          "default": "${ASC_API_KEY_PATH}",
+          "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "git": {
+      "default": {},
+      "properties": {
+        "defaultBranch": {
+          "default": "main",
+          "minLength": 1,
+          "type": "string"
+        },
+        "remote": {
+          "default": "origin",
+          "minLength": 1,
+          "type": "string"
+        },
+        "requireCleanDefaultBranch": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "hooks": {
+      "default": {},
+      "properties": {
+        "postBuild": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "preBuild": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ota": {
+      "properties": {
+        "access": {
+          "default": "path",
+          "enum": ["path", "none"],
+          "type": "string"
+        },
+        "branding": {
+          "default": {},
+          "properties": {
+            "accent": {
+              "pattern": "^#[0-9a-fA-F]{6}$",
+              "type": "string"
+            },
+            "title": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "exportMethod": {
+          "default": "development",
+          "enum": ["development", "ad-hoc", "enterprise"],
+          "type": "string"
+        },
+        "maxBuilds": {
+          "default": 60,
+          "exclusiveMinimum": 0,
+          "maximum": 500,
+          "type": "integer"
+        },
+        "storage": {
+          "properties": {
+            "accessKeyId": {
+              "default": "${JETBRIDGE_S3_ACCESS_KEY_ID}",
+              "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$",
+              "type": "string"
+            },
+            "bucket": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "endpoint": {
+              "format": "uri",
+              "type": "string"
+            },
+            "prefix": {
+              "default": "builds",
+              "type": "string"
+            },
+            "publicBaseUrl": {
+              "format": "uri",
+              "type": "string"
+            },
+            "region": {
+              "default": "us-east-1",
+              "minLength": 1,
+              "type": "string"
+            },
+            "secretAccessKey": {
+              "default": "${JETBRIDGE_S3_SECRET_ACCESS_KEY}",
+              "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}$",
+              "type": "string"
+            }
+          },
+          "required": ["bucket", "publicBaseUrl"],
+          "type": "object"
+        }
+      },
+      "required": ["storage"],
+      "type": "object"
+    },
+    "project": {
+      "properties": {
+        "appIcon": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "baseBundleId": {
+          "pattern": "^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$",
+          "type": "string"
+        },
+        "deviceTypes": {
+          "default": ["iPhone"],
+          "items": {
+            "enum": ["iPhone", "iPad"],
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "iosDir": {
+          "default": ".",
+          "minLength": 1,
+          "type": "string"
+        },
+        "scheme": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "teamId": {
+          "pattern": "^[A-Z0-9]{10}$",
+          "type": "string"
+        },
+        "xcodegen": {
+          "default": false,
+          "type": "boolean"
+        },
+        "xcodeproj": {
+          "minLength": 1,
+          "pattern": ".*\\.xcodeproj$",
+          "type": "string"
+        },
+        "xcworkspace": {
+          "minLength": 1,
+          "pattern": ".*\\.xcworkspace$",
+          "type": "string"
+        }
+      },
+      "required": ["scheme", "teamId", "baseBundleId"],
+      "type": "object"
+    },
+    "variant": {
+      "properties": {
+        "displayName": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "labelBudget": {
+          "default": 14,
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "labelPrefix": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "noiseWords": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "targets": {
+          "default": [],
+          "items": {
+            "properties": {
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "variantEntitlements": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": ["name"],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["displayName"],
+      "type": "object"
+    }
+  },
+  "required": ["configVersion", "project", "variant"],
+  "type": "object"
+}
