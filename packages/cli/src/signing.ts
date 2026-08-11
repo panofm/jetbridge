@@ -13,9 +13,8 @@ export interface SigningProfiles {
   byTarget: Record<string, string>;
 }
 
-/** `JETBRIDGE_PROFILE_APP`, or whatever the target configured. */
+/** `JETBRIDGE_PROFILE_APP` for the app, `JETBRIDGE_PROFILE_UPLOADWIDGET` for an extension. */
 export function profileSettingName(target: TargetConfig): string {
-  if (target.profileSetting) return target.profileSetting;
   const key = (target.bundleIdSuffix ?? 'app').toUpperCase().replace(/[^A-Z0-9]/g, '_');
   return `JETBRIDGE_PROFILE_${key}`;
 }
@@ -24,7 +23,7 @@ export function profileSettingName(target: TargetConfig): string {
 export function signSettings(suffix: string, profiles: SigningProfiles, config: Config): string[] {
   // No variant means the project's own automatic signing, untouched.
   if (!suffix) return [];
-  const settings = [`${config.variant.buildSettings.signStyle}=Manual`];
+  const settings = ['JETBRIDGE_SIGN_STYLE=Manual'];
   for (const target of config.variant.targets) {
     const profile = profiles.byTarget[target.name];
     if (profile) settings.push(`${profileSettingName(target)}=${profile}`);
@@ -33,11 +32,10 @@ export function signSettings(suffix: string, profiles: SigningProfiles, config: 
 }
 
 /** The bundle-id suffix and home-screen label, as build settings. */
-export function variantSettings(suffix: string, displayName: string, config: Config): string[] {
-  const names = config.variant.buildSettings;
+export function variantSettings(suffix: string, displayName: string): string[] {
   return [
-    ...(suffix ? [`${names.bundleSuffix}=.${suffix}`] : []),
-    ...(displayName ? [`${names.displayName}=${displayName}`] : []),
+    ...(suffix ? [`JETBRIDGE_SUFFIX=.${suffix}`] : []),
+    ...(displayName ? [`JETBRIDGE_DISPLAY_NAME=${displayName}`] : []),
   ];
 }
 

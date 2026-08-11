@@ -133,7 +133,7 @@ describe('buildArgs', () => {
       '/dd',
       'CURRENT_PROJECT_VERSION=1700000000',
       'DEBUG_INFORMATION_FORMAT=dwarf',
-      'JETBRIDGE_BUNDLE_SUFFIX=.wave',
+      'JETBRIDGE_SUFFIX=.wave',
       'JETBRIDGE_DISPLAY_NAME=Acme Wave',
       'JETBRIDGE_SIGN_STYLE=Manual',
       'JETBRIDGE_PROFILE_APP=Acme wave app',
@@ -159,12 +159,12 @@ describe('buildArgs', () => {
       project,
       request({ profiles: { byTarget: { Acme: 'Acme wave app' } } }),
     );
-    expect(args.some((a) => a.startsWith('JETBRIDGE_BUNDLE_SUFFIX'))).toBe(false);
+    expect(args.some((a) => a.startsWith('JETBRIDGE_SUFFIX'))).toBe(false);
     expect(args.some((a) => a.startsWith('JETBRIDGE_SIGN_STYLE'))).toBe(false);
     expect(args.some((a) => a.startsWith('JETBRIDGE_PROFILE_'))).toBe(false);
   });
 
-  it('stamps the git sha under the configured setting name', () => {
+  it('stamps the git sha as JETBRIDGE_GIT_SHA', () => {
     expect(buildArgs(fakeBoundary(), projectOf(), request({ gitSha: 'abc1234' }))).toContain(
       'JETBRIDGE_GIT_SHA=abc1234',
     );

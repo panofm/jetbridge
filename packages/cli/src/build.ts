@@ -74,8 +74,8 @@ export function buildArgs(boundary: Boundary, project: Project, request: BuildRe
     // seconds to each incremental install, for a debug artifact a dev build
     // never reads: a non-stripped build symbolicates from its own DWARF.
     ...(request.withDsym ? [] : ['DEBUG_INFORMATION_FORMAT=dwarf']),
-    ...(request.gitSha ? [`${config.variant.buildSettings.gitSha}=${request.gitSha}`] : []),
-    ...variantSettings(request.suffix, request.displayName, config),
+    ...(request.gitSha ? [`JETBRIDGE_GIT_SHA=${request.gitSha}`] : []),
+    ...variantSettings(request.suffix, request.displayName),
     ...signSettings(request.suffix, request.profiles, config),
     '-allowProvisioningUpdates',
     ...authArgs(boundary, config),

@@ -167,7 +167,7 @@ describe('simInstall', () => {
     const boundary = boundaryFor('wave');
     await simInstall(boundary, project, { suffix: 'wave', displayName: 'Acme Wave' });
     const build = boundary.findCall('xcodebuild', 'build')!;
-    expect(build.args).toContain('JETBRIDGE_BUNDLE_SUFFIX=.wave');
+    expect(build.args).toContain('JETBRIDGE_SUFFIX=.wave');
     expect(build.args).toContain('JETBRIDGE_DISPLAY_NAME=Acme Wave');
   });
 

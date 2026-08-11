@@ -408,7 +408,7 @@ describe('a variant run against cached profiles', () => {
     await wiredInstall(boundary, variantProject, variantOptions);
     expect(duringBuild).toBe(SWAPPED_PBXPROJ);
     expect(boundary.findCall('xcodebuild', 'JETBRIDGE_PROFILE_APP=Acme wave app')).toBeDefined();
-    expect(boundary.findCall('xcodebuild', 'JETBRIDGE_BUNDLE_SUFFIX=.wave')).toBeDefined();
+    expect(boundary.findCall('xcodebuild', 'JETBRIDGE_SUFFIX=.wave')).toBeDefined();
   });
 
   it('restores the project file BEFORE the install runs', async () => {

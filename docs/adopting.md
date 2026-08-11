@@ -111,17 +111,18 @@ This is the part no tool can work out for you.
 
 jetbridge passes build settings on the `xcodebuild` command line. Your project decides what they mean. A command-line build setting overrides the same setting from any xcconfig or target, which is what makes this work.
 
-These are the default names. All of them are configurable under `variant.buildSettings`.
+These names are fixed. Your project consumes them as they are — there is nothing to configure.
 
 | Setting                       | Value jetbridge passes        | What your project does with it        |
 | ----------------------------- | ----------------------------- | ------------------------------------- |
-| `JETBRIDGE_BUNDLE_SUFFIX`     | `.wave` — only for a variant  | append to `PRODUCT_BUNDLE_IDENTIFIER` |
+| `JETBRIDGE_SUFFIX`            | `.wave` — only for a variant  | append to `PRODUCT_BUNDLE_IDENTIFIER` |
 | `JETBRIDGE_DISPLAY_NAME`      | `Acme Wave`                   | `INFOPLIST_KEY_CFBundleDisplayName`   |
 | `JETBRIDGE_SIGN_STYLE`        | `Manual` — only for a variant | `CODE_SIGN_STYLE`                     |
+| `JETBRIDGE_GIT_SHA`           | `abc1234` — when there is one | whatever you stamp it into            |
 | `JETBRIDGE_PROFILE_APP`       | the generated profile name    | `PROVISIONING_PROFILE_SPECIFIER`      |
 | `JETBRIDGE_PROFILE_<SEGMENT>` | one per extension             | the same, on that extension's target  |
 
-The profile setting name is built from the target's `bundleIdSuffix`, uppercased: an extension with `"bundleIdSuffix": "uploadwidget"` gets `JETBRIDGE_PROFILE_UPLOADWIDGET`. The app itself, which has no suffix, gets `JETBRIDGE_PROFILE_APP`. Set `profileSetting` on the target to choose a different name.
+The profile setting name is built from the target's `bundleIdSuffix`, uppercased: an extension with `"bundleIdSuffix": "uploadwidget"` gets `JETBRIDGE_PROFILE_UPLOADWIDGET`. The app itself, which has no suffix, gets `JETBRIDGE_PROFILE_APP`.
 
 ### With xcconfig files
 
@@ -129,53 +130,56 @@ Add these lines to the xcconfig your app target uses.
 
 ```
 // Empty for a plain build; jetbridge passes ".wave" for a variant.
-JETBRIDGE_BUNDLE_SUFFIX =
+JETBRIDGE_SUFFIX =
 JETBRIDGE_SIGN_STYLE = Automatic
 JETBRIDGE_DISPLAY_NAME = Acme Dev
 
-PRODUCT_BUNDLE_IDENTIFIER = io.acme.app.dev$(JETBRIDGE_BUNDLE_SUFFIX)
+// io.acme.app.dev is project.baseBundleId, spelled the same on both sides.
+PRODUCT_BUNDLE_IDENTIFIER = io.acme.app.dev$(JETBRIDGE_SUFFIX)
+// Acme Dev above is variant.displayName.
 INFOPLIST_KEY_CFBundleDisplayName = $(JETBRIDGE_DISPLAY_NAME)
 CODE_SIGN_STYLE = $(JETBRIDGE_SIGN_STYLE)
+// One per entry in variant.targets; JETBRIDGE_PROFILE_APP is the app itself.
 PROVISIONING_PROFILE_SPECIFIER = $(JETBRIDGE_PROFILE_APP)
 ```
+
+### With a generated project
+
+If XcodeGen builds the project (`project.projectYml`), the same four lines go in the target's `settings` block of `project.yml`, with the jetbridge config key that supplies each value:
+
+```yaml
+settings:
+  # project.baseBundleId
+  PRODUCT_BUNDLE_IDENTIFIER: io.acme.app.dev$(JETBRIDGE_SUFFIX)
+  # variant.displayName
+  INFOPLIST_KEY_CFBundleDisplayName: $(JETBRIDGE_DISPLAY_NAME)
+  CODE_SIGN_STYLE: $(JETBRIDGE_SIGN_STYLE)
+  # variant.targets[] — one JETBRIDGE_PROFILE_<SEGMENT> per target
+  PROVISIONING_PROFILE_SPECIFIER: $(JETBRIDGE_PROFILE_APP)
+```
+
+Keep the same three defaults (`JETBRIDGE_SUFFIX`, `JETBRIDGE_SIGN_STYLE`, `JETBRIDGE_DISPLAY_NAME`) in the base `settings`, so a build from the Xcode GUI still resolves them.
 
 The three defaults at the top are what makes a plain build and a build from the Xcode GUI keep working. jetbridge only passes the suffix and the sign style for a variant, so without a default the settings resolve empty and the GUI build gets no display name and automatic signing turned off.
 
 For an extension, add the same lines to that target's xcconfig, with its own two values:
 
 ```
-PRODUCT_BUNDLE_IDENTIFIER = io.acme.app.dev$(JETBRIDGE_BUNDLE_SUFFIX).uploadwidget
+PRODUCT_BUNDLE_IDENTIFIER = io.acme.app.dev$(JETBRIDGE_SUFFIX).uploadwidget
 PROVISIONING_PROFILE_SPECIFIER = $(JETBRIDGE_PROFILE_UPLOADWIDGET)
 ```
 
 ### Without xcconfig files
 
-If the project sets build settings in the Xcode UI, you have two routes, and the right answer uses both.
+If the project sets build settings in the Xcode UI, do the same four lines by hand. Select the target and open **Build Settings**.
 
-**For the bundle suffix, use the same indirection.** Select the target, open **Build Settings**, find **Product Bundle Identifier**, and set it to:
+1. **Add three User-Defined settings** — `JETBRIDGE_SUFFIX` (empty), `JETBRIDGE_SIGN_STYLE` = `Automatic`, `JETBRIDGE_DISPLAY_NAME` = `Acme Dev`, which is `variant.displayName`. They are the defaults a plain build and a build from the GUI resolve to.
+2. **Product Bundle Identifier** → `io.acme.app.dev$(JETBRIDGE_SUFFIX)`, where `io.acme.app.dev` is `project.baseBundleId`.
+3. **Bundle Display Name** → `$(JETBRIDGE_DISPLAY_NAME)`.
+4. **Code Signing Style** → `$(JETBRIDGE_SIGN_STYLE)`.
+5. **Provisioning Profile** → `$(JETBRIDGE_PROFILE_APP)`, and add a User-Defined `JETBRIDGE_PROFILE_APP` with an empty default.
 
-```
-io.acme.app.dev$(JETBRIDGE_BUNDLE_SUFFIX)
-```
-
-An undefined build setting expands to nothing, so a plain build and a build from the GUI both resolve to `io.acme.app.dev`. This one needs the indirection because the value is a fragment, not the whole setting.
-
-**For the other three, skip the indirection and rename the settings.** Every other value jetbridge passes is the complete value of a real Xcode setting, so point jetbridge at the Xcode name and let the command line override it directly:
-
-```jsonc
-"variant": {
-  "displayName": "Acme Dev",
-  "buildSettings": {
-    "displayName": "INFOPLIST_KEY_CFBundleDisplayName",
-    "signStyle": "CODE_SIGN_STYLE",
-  },
-  "targets": [{ "name": "Acme", "profileSetting": "PROVISIONING_PROFILE_SPECIFIER" }],
-}
-```
-
-Nothing in the project changes, and a plain build is untouched, because jetbridge passes the sign style and the profile only for a variant.
-
-**One limit.** A command-line build setting applies to every target in the build. Renaming `profileSetting` to `PROVISIONING_PROFILE_SPECIFIER` works for a single-target app only — with an extension, both targets would receive the same profile name. For more than one target, add a **User-Defined** setting named `JETBRIDGE_PROFILE_APP` to the app target and `JETBRIDGE_PROFILE_UPLOADWIDGET` to the extension, and set each target's **Provisioning Profile** to `$(...)` of its own.
+A command-line build setting applies to every target in the build, so the profile name has to stay behind its own setting per target: the app reads `$(JETBRIDGE_PROFILE_APP)` and an extension with `"bundleIdSuffix": "uploadwidget"` reads `$(JETBRIDGE_PROFILE_UPLOADWIDGET)`. Pointing both at `PROVISIONING_PROFILE_SPECIFIER` directly would give both targets the same profile.
 
 ## 5. Reduced variant entitlements
 

@@ -116,7 +116,7 @@ The dropped words are conventional-commit types (`feat`, `fix`, `chore`, …) an
 installed io.acme.app.dev.wave ("Acme Wave") → Dev's iPhone
 ```
 
-**One app where you wanted two** — the suffix never reached the build. The most likely cause is the missing xcconfig wiring: without `PRODUCT_BUNDLE_IDENTIFIER = io.acme.app.dev$(JETBRIDGE_BUNDLE_SUFFIX)`, jetbridge passes the suffix and the project ignores it. See [adopting.md, step 4](./adopting.md#4-the-xcconfig-wiring).
+**One app where you wanted two** — the suffix never reached the build. The most likely cause is the missing xcconfig wiring: without `PRODUCT_BUNDLE_IDENTIFIER = io.acme.app.dev$(JETBRIDGE_SUFFIX)`, jetbridge passes the suffix and the project ignores it. See [adopting.md, step 4](./adopting.md#4-the-xcconfig-wiring).
 
 On a simulator the same cause shows up as a launch failure instead. The build produced the plain bundle id, and the install step looks for the variant one, which is not there:
 

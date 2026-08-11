@@ -26,11 +26,6 @@ export const COMMIT_TYPE_NOISE = [
   'worktree',
 ] as const;
 
-const identifier = z
-  .string()
-  .min(1)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'must be a plain identifier');
-
 /**
  * A reference to an environment variable, never a value.
  *
@@ -86,26 +81,6 @@ const targetSchema = z.object({
   capabilities: z
     .array(z.string().regex(/^[A-Z0-9_]+$/, 'an App Store Connect capability type'))
     .default([]),
-  /**
-   * Build setting carrying this target's profile name. The project's xcconfig
-   * has to read it — `PROVISIONING_PROFILE_SPECIFIER = $(JETBRIDGE_PROFILE_APP)`.
-   */
-  profileSetting: identifier.optional(),
-});
-
-/**
- * Build settings jetbridge passes on the xcodebuild command line. The project
- * decides what to do with them; these are just the names both sides agree on.
- */
-const buildSettingNamesSchema = z.object({
-  /** Appended to the bundle id, e.g. `.wave`. */
-  bundleSuffix: identifier.default('JETBRIDGE_BUNDLE_SUFFIX'),
-  /** The home-screen label. */
-  displayName: identifier.default('JETBRIDGE_DISPLAY_NAME'),
-  /** Set to `Manual` for a variant, so the build signs against our profiles. */
-  signStyle: identifier.default('JETBRIDGE_SIGN_STYLE'),
-  /** Optional provenance stamp, e.g. the short commit SHA. */
-  gitSha: identifier.default('JETBRIDGE_GIT_SHA'),
 });
 
 const projectSchema = z.object({
@@ -165,7 +140,6 @@ const variantSchema = z.object({
   noiseWords: z.array(z.string().min(1)).optional(),
   /** Every target that needs its own registered bundle id. */
   targets: z.array(targetSchema).default([]),
-  buildSettings: buildSettingNamesSchema.prefault({}),
   /** Name given to generated provisioning profiles. Defaults to the label prefix. */
   profilePrefix: z.string().min(1).optional(),
 });

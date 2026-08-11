@@ -59,11 +59,11 @@ const variantConfig = (overrides: Record<string, unknown> = {}): Config =>
   });
 
 describe('profileSettingName', () => {
-  it('defaults to JETBRIDGE_PROFILE_APP for the app target', () => {
+  it('is JETBRIDGE_PROFILE_APP for the app target', () => {
     expect(profileSettingName({ name: 'Acme', capabilities: [] })).toBe('JETBRIDGE_PROFILE_APP');
   });
 
-  it('defaults to the uppercased bundle-id segment for an extension', () => {
+  it('is the uppercased bundle-id segment for an extension', () => {
     expect(
       profileSettingName({
         name: 'Upload Widget',
@@ -71,12 +71,6 @@ describe('profileSettingName', () => {
         capabilities: [],
       }),
     ).toBe('JETBRIDGE_PROFILE_UPLOADWIDGET');
-  });
-
-  it('honours an explicit setting name', () => {
-    expect(
-      profileSettingName({ name: 'Acme', profileSetting: 'ACME.PROFILE', capabilities: [] }),
-    ).toBe('ACME.PROFILE');
   });
 });
 
@@ -103,34 +97,22 @@ describe('signSettings', () => {
       'JETBRIDGE_PROFILE_APP=Acme wave app',
     ]);
   });
-
-  it('uses the configured setting names', () => {
-    const config = testConfig({
-      variant: {
-        targets: [{ name: 'Acme' }],
-        buildSettings: { signStyle: 'ACME-SIGN' },
-      },
-    });
-    expect(signSettings('wave', { byTarget: {} }, config)).toEqual(['ACME-SIGN=Manual']);
-  });
 });
 
 describe('variantSettings', () => {
   it('sets the bundle suffix with a leading dot and the display name', () => {
-    expect(variantSettings('wave', 'Acme Wave', testConfig())).toEqual([
-      'JETBRIDGE_BUNDLE_SUFFIX=.wave',
+    expect(variantSettings('wave', 'Acme Wave')).toEqual([
+      'JETBRIDGE_SUFFIX=.wave',
       'JETBRIDGE_DISPLAY_NAME=Acme Wave',
     ]);
   });
 
   it('sets only the display name for a plain build', () => {
-    expect(variantSettings('', 'Acme Dev', testConfig())).toEqual([
-      'JETBRIDGE_DISPLAY_NAME=Acme Dev',
-    ]);
+    expect(variantSettings('', 'Acme Dev')).toEqual(['JETBRIDGE_DISPLAY_NAME=Acme Dev']);
   });
 
   it('sets nothing when there is neither', () => {
-    expect(variantSettings('', '', testConfig())).toEqual([]);
+    expect(variantSettings('', '')).toEqual([]);
   });
 });
 

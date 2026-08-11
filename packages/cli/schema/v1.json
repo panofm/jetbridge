@@ -222,36 +222,6 @@
     },
     "variant": {
       "properties": {
-        "buildSettings": {
-          "default": {},
-          "properties": {
-            "bundleSuffix": {
-              "default": "JETBRIDGE_BUNDLE_SUFFIX",
-              "minLength": 1,
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-              "type": "string"
-            },
-            "displayName": {
-              "default": "JETBRIDGE_DISPLAY_NAME",
-              "minLength": 1,
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-              "type": "string"
-            },
-            "gitSha": {
-              "default": "JETBRIDGE_GIT_SHA",
-              "minLength": 1,
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-              "type": "string"
-            },
-            "signStyle": {
-              "default": "JETBRIDGE_SIGN_STYLE",
-              "minLength": 1,
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
         "displayName": {
           "minLength": 1,
           "type": "string"
@@ -299,11 +269,6 @@
               },
               "name": {
                 "minLength": 1,
-                "type": "string"
-              },
-              "profileSetting": {
-                "minLength": 1,
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
                 "type": "string"
               },
               "variantEntitlements": {

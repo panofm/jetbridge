@@ -492,8 +492,8 @@ export function archiveArgs(
     '-derivedDataPath',
     request.derivedDataPath,
     `CURRENT_PROJECT_VERSION=${request.buildNumber}`,
-    ...(request.gitSha ? [`${config.variant.buildSettings.gitSha}=${request.gitSha}`] : []),
-    ...variantSettings(request.suffix, request.displayName, config),
+    ...(request.gitSha ? [`JETBRIDGE_GIT_SHA=${request.gitSha}`] : []),
+    ...variantSettings(request.suffix, request.displayName),
     ...signSettings(request.suffix, request.profiles, config),
     // Deliberately NOT setting CODE_SIGN_IDENTITY here, even though an ad hoc
     // profile needs a distribution one. A build setting on the xcodebuild
