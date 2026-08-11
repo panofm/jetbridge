@@ -1,6 +1,6 @@
 {
   "name": "jetbridge",
-  "version": "0.1.0-rc.0",
+  "version": "0.1.0-rc.1",
   "description": "Build, sign and deliver iOS dev builds — to a simulator, down a cable, or over the air to your own bucket.",
   "license": "MIT",
   "type": "module",
