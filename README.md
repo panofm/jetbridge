@@ -182,6 +182,32 @@ jetbridge passes a few build settings on the xcodebuild command line; your xccon
 
 `hooks.preBuild` and `hooks.postBuild` are shell commands run in the project root — the escape hatch for whatever your project does before a build that jetbridge should not know about. JSON cannot hold a function; shell strings are the deliberate cost of a config file a wizard can write and a person can read.
 
+## Unattended runs
+
+Every command works with nobody watching — from a script, a pipe, CI, or an AI agent. **You do not need to set `CI=1`.**
+
+jetbridge decides for itself: no terminal means no questions. It falls back to the flag-driven behaviour and, where an answer is genuinely required, fails immediately naming the flag that supplies it. It never waits for input it cannot receive, because a command that hangs prints nothing at all — the worst thing that can happen to an unattended caller.
+
+```
+jetbridge init --yes --scheme Acme --team-id ABCDE12345 | cat   # no terminal, no prompt
+```
+
+Flags that supply answers non-interactively:
+
+| Flag                            | Answers                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------ |
+| `jetbridge init --yes`          | accepts every detected default, and consents to writing the file         |
+| `jetbridge init --scheme` etc.  | any value `init` could not infer — the error names the missing flag      |
+| `jetbridge bundles rm --yes`    | consents to the deletion; without it the plan prints and nothing changes |
+| `jetbridge bundles prune --yes` | the same, for pruning                                                    |
+
+Two overrides exist for a person who IS on a terminal but wants the unattended path anyway. Neither is ever required:
+
+- `CI=1` — the long-standing convention, still honoured.
+- `JETBRIDGE_NON_INTERACTIVE=1` — the same lever, for when you are not in CI.
+
+Hooks (`hooks.preBuild` / `hooks.postBuild`) run with stdin closed unless there is a real terminal, so a hook that tries to prompt gets EOF and fails rather than hanging the build forever.
+
 ## Requirements
 
 - macOS with Xcode and its command line tools

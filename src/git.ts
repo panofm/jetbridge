@@ -6,7 +6,6 @@
  * default branch is not the one this tool happens to assume.
  */
 import type { Boundary } from './boundary.js';
-import type { Config } from './config.js';
 import { fail, type Project } from './project.js';
 
 export interface GitStamp {
@@ -117,5 +116,5 @@ export async function requireCleanDefaultBranch(
 }
 
 /** The provenance stamp passed to the build, when there is one. */
-export const stampSetting = (stamp: GitStamp | null, config: Config): string | undefined =>
+export const stampSetting = (stamp: GitStamp | null): string | undefined =>
   stamp ? `${stamp.shortSha}${stamp.dirty ? '-dirty' : ''}` : undefined;

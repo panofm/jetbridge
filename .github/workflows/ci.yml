@@ -30,6 +30,11 @@ jobs:
       - run: npx tsc --noEmit
       - run: npx eslint .
       - run: npx prettier --check .
-      - run: npx vitest run
+      - name: Schema matches the code that generates it
+        run: npm run check:schema
+      # Before the tests, not after: some tests drive the built CLI as a
+      # subprocess, and against a stale dist/ they would pass while testing
+      # yesterday's binary.
       - name: Build the package
         run: npm run build
+      - run: npx vitest run

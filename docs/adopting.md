@@ -8,10 +8,10 @@ The order matters. Each step is cheap and the next one depends on it:
 
 1. Check the project meets the four requirements below.
 2. Run `jetbridge init`.
-3. Reach a working `jetbridge sim --suffix`. This needs no credentials and no signing at all.
-4. Add the xcconfig wiring.
+3. Reach a working `jetbridge install`. This needs no credentials and no signing at all.
+4. Add the xcconfig wiring, then reach a working `jetbridge install --suffix`.
 5. Add the reduced variant entitlements, if your app has capabilities the public API cannot grant.
-6. Reach a working `jetbridge wired --suffix`.
+6. Reach a working `jetbridge install --device --suffix`.
 
 ## 1. What the project needs first
 
@@ -79,12 +79,31 @@ Running `init` again is a repair pass, not a fresh start. It compares the projec
 Do this before you touch signing:
 
 ```sh
-jetbridge sim --suffix wave
+jetbridge install
 ```
 
-A simulator validates no code signature. This path needs no certificate, no provisioning profile and no App Store Connect key, and it never calls the provisioner. If it works, your scheme, configuration and build are correct, and everything left is signing.
+The simulator is the default destination, for exactly this reason: it validates no code signature. This path needs no certificate, no provisioning profile, no App Store Connect key and no paired phone, and it never calls the provisioner. So the first command you run always works. If it does, your scheme, configuration and build are correct, and everything left is signing.
 
-At this stage the variant is not really a variant yet: without the xcconfig wiring in the next step, the build ignores the suffix and installs under the plain bundle id. The install still proves the build works.
+`jetbridge install --simulator` is the same thing said out loud. `--device` is the other destination, and step 7 gets to it. Both take an optional value, so one flag answers both questions — where to install, and which one:
+
+```sh
+jetbridge install                             # any available simulator
+jetbridge install --simulator "iPhone 17 Pro" # that simulator
+jetbridge install --device                    # every reachable paired phone
+jetbridge install --device "Dev's iPhone"     # that phone
+```
+
+Naming both is an error: `pass --device or --simulator, not both`.
+
+Do not use `--suffix` yet. Until the wiring in the next step is in place, the build ignores the suffix and produces the plain bundle id, while the install step looks for the variant one — so the app installs and then fails to launch:
+
+```
+installed io.acme.app.dev.wave but could not launch it on <simulator>:
+  <what simctl said>
+  Open it from the simulator home screen to see why.
+```
+
+That failure is the check for step 4, not a problem with step 3.
 
 ## 4. The xcconfig wiring
 
@@ -235,41 +254,83 @@ Exactly one target leaves `bundleIdSuffix` unset — that is the app. Two would 
 # 1. Write the config.
 jetbridge init
 
-# 2. Build and launch on a simulator. No credentials, no signing.
-jetbridge sim
-
-# 3. The same as a variant. Still no credentials.
-jetbridge sim --suffix wave
+# 2. Build and launch. The simulator is the default, so this needs nothing.
+jetbridge install
 ```
 
-Stop here until step 3 works. Then add the xcconfig wiring from step 4 and run it again: the app should now install beside the plain one, with its own home-screen label.
+Stop here until that works. Then add the xcconfig wiring from step 4, and check it with a variant — still no credentials, still nothing signed:
 
 ```sh
-# 4. Confirm the variant really is a separate app.
-jetbridge sim --suffix wave
+# 3. The variant should install beside the plain app, with its own label.
+jetbridge install --suffix wave
 ```
 
-Only then set up credentials — the README covers this — and go to the device:
+Two icons on the simulator home screen means the wiring is right. A launch failure means the suffix is not reaching `PRODUCT_BUNDLE_IDENTIFIER`.
+
+Only then set up credentials — the README covers this — and go to the phone:
 
 ```sh
-# 5. Register the bundle id, mint a profile, build and install over the cable.
-jetbridge wired --suffix wave
+# 4. Build and install the plain app over the cable. Still no credentials needed.
+jetbridge install --device
+
+# 5. Register the bundle id, mint a profile, and install the variant.
+jetbridge install --device --suffix wave
 ```
 
-If step 5 fails, [troubleshooting.md](./troubleshooting.md) is organised by the message you actually see.
+When the phone is not on your desk, the same variant goes out as a link instead:
+
+```sh
+# 6. Archive, upload, and print a URL someone else can open.
+jetbridge link --suffix wave
+```
+
+If any of these fails, [troubleshooting.md](./troubleshooting.md) is organised by the message you actually see.
 
 ### What each step proves
 
-| Step                       | Needs a key | What a pass tells you                                        |
-| -------------------------- | ----------- | ------------------------------------------------------------ |
-| `jetbridge sim`            | no          | the scheme, the configuration and the build are right        |
-| `jetbridge sim --suffix`   | no          | the xcconfig wiring resolves the suffix                      |
-| `jetbridge wired`          | no          | the device is reachable and the plain build signs            |
-| `jetbridge wired --suffix` | **yes**     | registration, provisioning and the entitlement swap all work |
+| Step                                  | Needs a key | What a pass tells you                                        |
+| ------------------------------------- | ----------- | ------------------------------------------------------------ |
+| `jetbridge install`                   | no          | the scheme, the configuration and the build are right        |
+| `jetbridge install --suffix`          | no          | the xcconfig wiring resolves the suffix                      |
+| `jetbridge install --device`          | no          | the phone is reachable and the plain build signs             |
+| `jetbridge install --device --suffix` | **yes**     | registration, provisioning and the entitlement swap all work |
+| `jetbridge link --suffix`             | **yes**     | the archive, the bucket and the public URL all work          |
 
-`jetbridge wired --suffix` refuses before it builds anything when this machine has no credentials:
+A variant on a real device refuses before it builds anything when this machine has no credentials:
 
 ```
 a variant build has to register a new bundle id, which needs App Store Connect credentials.
   Drop the variant to build the plain bundle id instead.
+```
+
+A variant on the **simulator** never hits that check, which is what makes step 3 possible on a machine that has never been near the developer account.
+
+## 8. Running jetbridge unattended
+
+From a script, from CI, or from a coding agent, the rule is the same: nothing prompts if you supply the answers as flags, and no environment variable has to be set to make that true. jetbridge treats a pipe exactly like `CI=1` — neither is required, and neither changes what a command does.
+
+Only two commands ever ask anything, and both take a flag instead:
+
+```sh
+# init is the only interactive command. --yes accepts every detected value.
+jetbridge init --yes --team-id ABCDE12345 --bundle-id io.acme.app.dev
+
+# Anything destructive prints its plan and stops. -y executes it.
+jetbridge bundles prune -y
+```
+
+`init --yes` never guesses. Whatever it could not read out of the project is a hard failure naming the flag that supplies it, so a wrong config is never written silently:
+
+```
+these could not be worked out from the project, and there is nobody to ask:
+  project.teamId — pass --team-id
+```
+
+Every other command — `install`, `link`, `reindex`, `bundles ls`, `bundles provision` — asks nothing at all. `bundles ls --json` is the one to read from a script; `ls` is the default subcommand, so a bare `jetbridge bundles` lists too.
+
+Two more flags matter when a script has to be explicit rather than rely on the config:
+
+```sh
+jetbridge install --configuration Debug     # the Xcode build configuration
+jetbridge --config-file ./ci/jetbridge.config.json install   # which config file to read
 ```

@@ -9,16 +9,11 @@
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { Boundary } from './boundary.js';
 import { CONFIG_FILENAMES, formatConfigErrors, parseConfig, type Config } from './config.js';
+import { fail } from './errors.js';
 
-/** An expected failure with a written explanation — printed as one line, no stack. */
-export class JetbridgeError extends Error {
-  override readonly name = 'JetbridgeError';
-}
-
-/** A function declaration, not an arrow: TypeScript only narrows control flow through one. */
-export function fail(message: string): never {
-  throw new JetbridgeError(message);
-}
+// Re-exported so existing importers keep working; defined in errors.ts because
+// the boundary needs to throw without importing the layer above it.
+export { JetbridgeError, fail } from './errors.js';
 
 export interface Project {
   /** Directory holding the config file. Everything relative resolves from here. */

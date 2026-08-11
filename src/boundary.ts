@@ -22,6 +22,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
+import { fail } from './errors.js';
 
 export interface RunOptions {
   cwd?: string;
@@ -62,6 +63,8 @@ export interface HttpRequest {
   url: string;
   headers: Record<string, string>;
   body?: string;
+  /** Overrides the default. A request that never answers is a hang, so there is always one. */
+  timeoutMs?: number;
 }
 
 export interface FileSystem {
@@ -132,37 +135,85 @@ export const nodeFileSystem: FileSystem = {
 };
 
 /**
- * A TTY that is not CI. Both halves matter: `CI=1` on a developer's machine is
- * the documented way to force the non-interactive path.
+ * Is there a person to ask?
+ *
+ * A TTY that is not CI, and that nobody has explicitly opted out of. All three
+ * halves matter: `CI=1` on a developer's machine is the documented way to force
+ * the non-interactive path, and `JETBRIDGE_NON_INTERACTIVE` is the same lever
+ * for someone who is not in CI and does not want to be prompted.
+ *
+ * Nothing REQUIRES any of them. No terminal is sufficient on its own — an agent
+ * behind a pipe gets the unattended behaviour without setting a variable, which
+ * is the whole point.
  */
 export function isInteractive(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(process.stdin.isTTY && process.stdout.isTTY) && !env.CI;
+  if (env.CI || env.JETBRIDGE_NON_INTERACTIVE) return false;
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-export function nodeBoundary(): Boundary {
-  const interactive = isInteractive();
+/** A request that never answers would hang forever, so one minute is the ceiling. */
+const HTTP_TIMEOUT_MS = 60_000;
+
+/**
+ * How a child process gets its three streams.
+ *
+ * stdin is the one that hangs, and `stdio: 'pipe'` does NOT protect you: execa
+ * leaves the pipe open when there is nothing to write to it, so a child that
+ * reads stdin waits for input that never comes and the whole command stalls
+ * with no output at all. That is the worst outcome for an unattended run — an
+ * agent waits forever and the session dies having printed nothing.
+ *
+ * So stdin is attached only when there is genuinely something to answer with:
+ * the caller's own `input`, or a real terminal with a person at it. Otherwise
+ * it is closed, and a tool that decides to ask a question reads EOF and gives
+ * up — which surfaces as an error, which is always better than a wait.
+ */
+function childStreams(
+  options: RunOptions,
+  interactive: boolean,
+): { stdout: 'pipe' | 'inherit'; stderr: 'pipe' | 'inherit'; stdin?: 'inherit' | 'ignore' } {
+  // Output still streams to the terminal when asked; only stdin is withheld.
+  const output = options.stdio === 'inherit' ? ('inherit' as const) : ('pipe' as const);
+  if (options.input !== undefined) return { stdout: output, stderr: output };
+  return {
+    stdout: output,
+    stderr: output,
+    stdin: options.stdio === 'inherit' && interactive ? 'inherit' : 'ignore',
+  };
+}
+
+export interface NodeBoundaryOptions {
+  /**
+   * Force the unattended path even on a terminal — what `--non-interactive`
+   * hands down. Never needed behind a pipe, which is already unattended.
+   */
+  nonInteractive?: boolean;
+}
+
+export function nodeBoundary(options: NodeBoundaryOptions = {}): Boundary {
+  const interactive = isInteractive() && options.nonInteractive !== true;
   return {
     exec: {
-      async run(command, args, options = {}) {
+      async run(command, args, runOptions = {}) {
         const result = await execa(command, args, {
-          cwd: options.cwd,
-          env: options.env,
+          cwd: runOptions.cwd,
+          env: runOptions.env,
           extendEnv: true,
-          stdio: options.stdio === 'inherit' ? 'inherit' : 'pipe',
-          input: options.input,
-          timeout: options.timeoutMs,
+          ...childStreams(runOptions, interactive),
+          ...(runOptions.input === undefined ? {} : { input: runOptions.input }),
+          timeout: runOptions.timeoutMs,
           reject: false,
         });
         return asResult(result);
       },
-      runSync(command, args, options = {}) {
+      runSync(command, args, runOptions = {}) {
         const result = execaSync(command, args, {
-          cwd: options.cwd,
-          env: options.env,
+          cwd: runOptions.cwd,
+          env: runOptions.env,
           extendEnv: true,
-          stdio: options.stdio === 'inherit' ? 'inherit' : 'pipe',
-          input: options.input,
-          timeout: options.timeoutMs,
+          ...childStreams(runOptions, interactive),
+          ...(runOptions.input === undefined ? {} : { input: runOptions.input }),
+          timeout: runOptions.timeoutMs,
           reject: false,
         });
         return asResult(result);
@@ -170,11 +221,24 @@ export function nodeBoundary(): Boundary {
     },
     fs: nodeFileSystem,
     async http(request) {
-      const response = await fetch(request.url, {
-        method: request.method,
-        headers: request.headers,
-        body: request.body,
-      });
+      const timeoutMs = request.timeoutMs ?? HTTP_TIMEOUT_MS;
+      let response: Response;
+      try {
+        response = await fetch(request.url, {
+          method: request.method,
+          headers: request.headers,
+          body: request.body,
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (error) {
+        // A blackholed host never answers and fetch never settles without this.
+        // Reported as an ordinary failure, because a stalled command is worse.
+        const reason =
+          (error as Error)?.name === 'TimeoutError'
+            ? `timed out after ${timeoutMs}ms`
+            : String((error as Error)?.message ?? error);
+        return fail(`${request.method} ${request.url} failed — ${reason}`);
+      }
       const headers: Record<string, string> = {};
       response.headers.forEach((value, key) => {
         headers[key.toLowerCase()] = value;

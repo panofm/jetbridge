@@ -57,8 +57,8 @@ export type { SimOptions } from './sim.js';
 export { otaInstall, reindex } from './ota.js';
 export type { OtaOptions, OtaResult } from './ota.js';
 
-export { cleanVariants } from './clean.js';
-export type { CleanOptions } from './clean.js';
+export { listBundles, provisionBundles, pruneBundles, removeBundles } from './bundles.js';
+export type { RegisteredVariant, RemovalResult, VariantRecord } from './bundles.js';
 
 export { runInit } from './init.js';
 export type { InitOptions, InitResult } from './init.js';

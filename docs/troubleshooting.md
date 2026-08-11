@@ -13,7 +13,7 @@ New to the tool? [adopting.md](./adopting.md) is the setup path. The [README](..
 **The fix**
 
 1. Register the device once: plug it in and build to it from Xcode. That adds it to the team.
-2. Re-run the OTA build. Every profile jetbridge mints covers every enabled device on the team, so the new phone is included from then on.
+2. Re-run `jetbridge link`. Every profile jetbridge mints covers every enabled device on the team, so the new phone is included from then on.
 
 If the device was already registered before the build, check it is _enabled_ in the developer portal. jetbridge asks Apple only for enabled devices, and refuses to build against an empty list:
 
@@ -64,7 +64,7 @@ could not register the bundle id io.acme.app.dev.wave: 403 FORBIDDEN_ERROR
 
 **The fix** — the key needs **App Manager** or **Admin**. Roles cannot be changed after a key is made, so make a new key in App Store Connect → Users and Access → Integrations → App Store Connect API, grant App Manager, and download the new `.p8`. It must be a **Team** key: an Individual key cannot manage bundle ids or profiles at all.
 
-The same 403 on a key that used to work usually means the key was revoked, or it belongs to a team you have left. `jetbridge clean` phrases that case directly:
+The same 403 on a key that used to work usually means the key was revoked, or it belongs to a team you have left. The `bundles` commands phrase that case directly:
 
 ```
 could not list bundle ids (HTTP 403).
@@ -118,6 +118,14 @@ installed io.acme.app.dev.wave ("Acme Wave") → Dev's iPhone
 
 **One app where you wanted two** — the suffix never reached the build. The most likely cause is the missing xcconfig wiring: without `PRODUCT_BUNDLE_IDENTIFIER = io.acme.app.dev$(JETBRIDGE_BUNDLE_SUFFIX)`, jetbridge passes the suffix and the project ignores it. See [adopting.md, step 4](./adopting.md#4-the-xcconfig-wiring).
 
+On a simulator the same cause shows up as a launch failure instead. The build produced the plain bundle id, and the install step looks for the variant one, which is not there:
+
+```
+installed io.acme.app.dev.wave but could not launch it on <simulator>:
+  <what simctl said>
+  Open it from the simulator home screen to see why.
+```
+
 **A pasted bundle id** is refused rather than flattened:
 
 ```
@@ -154,6 +162,8 @@ Copy the path out of `project.pbxproj` exactly. If the project is generated from
 
 ## No device is found
 
+Only `jetbridge install --device` needs a phone. The simulator is the default destination, and `jetbridge link` needs no hardware at all.
+
 **You see** — one of two messages, and they mean different things.
 
 **Nothing is paired at all:**
@@ -169,7 +179,7 @@ Pair the phone once in Xcode. Trust the computer on the phone when it asks.
 
 ```
 no paired device is reachable — plug one in, or join it to this Mac's Wi-Fi.
-  (`jetbridge ota` needs no device at all)
+  (`jetbridge link` needs no device at all)
 ```
 
 A device counts as reachable when it is paired **and** reports a transport — a cable, or the local network. A phone that is paired but asleep in a drawer has no transport.
@@ -188,7 +198,7 @@ Two things that are not the problem:
   over Wi-Fi (slower): Dev's iPhone — cable them for the fast loop
   ```
 
-Every run prints the full paired list with each device's transport before it selects anything. `--device` accepts the identifier, the name, the UDID or the serial number.
+Every run prints the full paired list with each device's transport before it selects anything. A bare `--device` takes every reachable phone; `--device <value>` takes one, and the value can be the identifier, the name, the UDID or the serial number.
 
 Also check `project.deviceTypes` in the config. It defaults to `["iPhone"]`, and a paired iPad is filtered out before any of the above runs — deliberately, because `devicectl` reports an iPad's platform as `iOS` too.
 
@@ -230,13 +240,23 @@ That last condition is what makes a certificate rotation invalidate the cache by
 signing: cached profiles already cover these devices — skipping provisioning
 ```
 
-**The fix** — if signing still fails, bypass the cache:
+**The fix** — refresh the profiles on their own, without a build in the way:
 
 ```sh
-jetbridge wired --suffix wave --reprovision
+jetbridge bundles provision wave
 ```
 
-That deletes and recreates the profile with the current certificate and the current device list. If it fails too, the certificate is the problem rather than the cache:
+That registers what is missing and recreates the profile with the current certificate and the current device list. It is also the answer after you register a new phone: a profile minted before that phone existed does not cover it.
+
+If a build still fails, `--reprovision` on the install bypasses the profile cache for that run:
+
+```sh
+jetbridge install --device --suffix wave --reprovision
+```
+
+`--reprovision` belongs to a `--device` install and is refused on the simulator, because a simulator validates no signature — there is no profile involved to refresh.
+
+If that fails too, the certificate is the problem rather than the cache:
 
 ```
 no App Store Connect development certificate matches a signing identity in this keychain.
@@ -246,6 +266,22 @@ no App Store Connect development certificate matches a signing identity in this 
 
 A certificate in your Apple account whose private key is on another Mac cannot sign here. Either make a certificate on this machine, or export the key from the machine that has it.
 
+## `bundles prune` refuses to run offline
+
+**You see** — on a plane, on hotel Wi-Fi, or behind a VPN that cannot reach your git host, `jetbridge bundles prune` stops instead of pruning.
+
+**What is wrong** — nothing. This is deliberate.
+
+`prune` removes the variants whose git branch is gone from the remote. Working that out needs the remote's branch list. If the remote cannot be reached, the honest answer is "unknown", and the tempting one is "no branches came back, so every branch is gone" — which would delete every variant you have. So it aborts.
+
+**The fix** — get back on the network and re-run, or name what you want removed explicitly:
+
+```sh
+jetbridge bundles rm wave seededfeed
+```
+
+`bundles rm` takes names and asks the remote nothing, so it works offline. It is still a dry run until you add `-y`.
+
 ## Other messages
 
 **A build configuration that does not exist**
@@ -254,7 +290,14 @@ A certificate in your Apple account whose private key is on another Mac cannot s
 "Staging" is not one of this project's build configurations (Debug, Release)
 ```
 
-`configurations.available` lists what the project has. Re-run `jetbridge init` to refresh it — the repair pass reports exactly this kind of drift and updates only the fields you accept.
+`configurations.available` lists what the project has, and `--configuration <name>` is checked against it before anything builds. If the project really does have that configuration, re-run `jetbridge init` to refresh the list — the repair pass reports exactly this kind of drift and updates only the fields you accept.
+
+Note the two similar-looking flags. `-c, --configuration <name>` is the Xcode build configuration, the same word `xcodebuild -configuration` uses. The root `--config-file <path>` is which `jetbridge.config.json` to read:
+
+```sh
+jetbridge install --configuration Debug
+jetbridge --config-file ./elsewhere/jetbridge.config.json install
+```
 
 **The export produced no `.ipa`**
 
@@ -265,7 +308,7 @@ the export produced no .ipa in <path>.
 
 `ota.exportMethod` is `ad-hoc` by default. `enterprise` needs an Enterprise account and a distribution certificate to match.
 
-**A dirty working tree during an OTA build**
+**A dirty working tree during `jetbridge link`**
 
 ```
 the working tree is dirty — this .ipa matches no commit
@@ -284,15 +327,17 @@ a plain install must build exactly origin/main — HEAD is a1b2c3d, origin/main 
 
 Do what the last line says: install the branch as its own app with `--suffix`. That is what variants are for.
 
-**`jetbridge clean` deleted nothing**
+**`jetbridge bundles rm` or `bundles prune` deleted nothing**
 
-Deletion is irreversible and Apple restores nothing, so a dry run is the default:
+Deletion is irreversible and Apple restores nothing, so a dry run is the default on both. They print the plan and stop; `-y` executes it:
 
 ```
 dry run — nothing was deleted. Re-run with --yes to remove 3 variant(s).
 ```
 
-It also refuses to touch your base bundle id or the ids of extensions that ship in the plain build, whatever you name:
+Use `jetbridge bundles ls` first to see what the account actually holds for this project. `ls` is the default subcommand, so a bare `jetbridge bundles` lists too.
+
+Both refuse to touch your base bundle id or the ids of extensions that ship in the plain build, whatever you name:
 
 ```
 refusing to delete io.acme.app.dev — it is a core identifier, not a variant.

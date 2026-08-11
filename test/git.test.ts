@@ -174,21 +174,17 @@ describe('requireCleanDefaultBranch', () => {
 });
 
 describe('stampSetting', () => {
-  const config = testConfig();
-
   it('is the short SHA for a clean tree', () => {
-    expect(stampSetting({ sha: 'abcdef1234', shortSha: 'abcdef1', dirty: false }, config)).toBe(
-      'abcdef1',
-    );
+    expect(stampSetting({ sha: 'abcdef1234', shortSha: 'abcdef1', dirty: false })).toBe('abcdef1');
   });
 
   it('marks a dirty tree, so a build that does not match its SHA says so', () => {
-    expect(stampSetting({ sha: 'abcdef1234', shortSha: 'abcdef1', dirty: true }, config)).toBe(
+    expect(stampSetting({ sha: 'abcdef1234', shortSha: 'abcdef1', dirty: true })).toBe(
       'abcdef1-dirty',
     );
   });
 
   it('is undefined outside a git checkout', () => {
-    expect(stampSetting(null, config)).toBeUndefined();
+    expect(stampSetting(null)).toBeUndefined();
   });
 });

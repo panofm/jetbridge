@@ -8,6 +8,7 @@
  * never anticipated fails by name instead of hanging.
  */
 import { confirm, isCancel, note, select, text } from '@clack/prompts';
+import { isInteractive } from './boundary.js';
 import { fail } from './project.js';
 
 export interface Question {
@@ -50,7 +51,47 @@ const orCancel = <T>(value: T | symbol): T => {
 const withHint = (question: Question): string =>
   question.hint ? `${question.message} (${question.hint})` : question.message;
 
+/**
+ * The prompter for a run with nobody at the other end.
+ *
+ * Every question is a failure that names itself, because the alternatives are
+ * both worse: prompting writes escape codes into a pipe and waits forever, and
+ * silently defaulting answers a question nobody was asked on the operator's
+ * behalf. A caller reaching this has a gap in its own flag handling — the
+ * question's `name` is what says which one.
+ *
+ * `note` is not a question, so it still prints. Suppressing it would break the
+ * `--yes` path, whose whole job is to show what it is about to write.
+ */
+export function nonInteractivePrompter(reason: string): Prompter {
+  const refuse = (question: Question): never =>
+    fail(
+      `"${question.message}" needs an answer, and ${reason}.\n` +
+        `  Pass the flag that supplies ${question.name}, or re-run on a terminal.`,
+    );
+  return {
+    text: async (question) => refuse(question),
+    confirm: async (question) => refuse(question),
+    select: async (question) => refuse(question),
+    note(message, title) {
+      console.error(title ? `${title}\n${message}` : message);
+    },
+  };
+}
+
+/**
+ * The terminal prompter — and the last line of defence for an unattended run.
+ *
+ * It reads the real streams rather than the boundary, because it IS the
+ * terminal adapter: there is no seam left underneath it. When there is no
+ * terminal it hands back the refusing prompter instead, so a code path that
+ * forgets its own non-interactive check fails loudly rather than hanging. The
+ * callers' checks are the contract; this is the guarantee.
+ */
 export function clackPrompter(): Prompter {
+  if (!isInteractive()) {
+    return nonInteractivePrompter('this run has no terminal to ask on');
+  }
   return {
     async text(question) {
       const answer = orCancel(

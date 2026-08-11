@@ -326,6 +326,17 @@ const httpsProblem = (value: string): string | undefined => {
 const envNameProblem = (value: string): string | undefined =>
   /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value) ? undefined : 'must be a plain identifier';
 
+/**
+ * Whether this run answers its own questions.
+ *
+ * ONE definition, because every prompt site in this file is guarded by it and a
+ * site that forgets is a hang. Note which way round it reads: no terminal is
+ * sufficient on its own, so an agent needs no flag and no CI variable to get
+ * the unattended path. `--yes` is how a person opts into it deliberately.
+ */
+const isAuto = (boundary: Boundary, options: InitOptions): boolean =>
+  options.yes === true || !boundary.interactive;
+
 export async function runInit(
   boundary: Boundary,
   options: InitOptions,
@@ -357,7 +368,7 @@ async function create(
 ): Promise<InitResult> {
   const { prompts } = deps;
   // No terminal means no questions, so the flags have to carry everything.
-  const auto = options.yes === true || !boundary.interactive;
+  const auto = isAuto(boundary, options);
   const missing: Array<{ field: string; flag: string }> = [];
 
   const ask = async (spec: {
@@ -731,7 +742,7 @@ async function repair(
   configPath: string,
   detection: Detection,
 ): Promise<InitResult> {
-  const auto = options.yes === true || !boundary.interactive;
+  const auto = isAuto(boundary, options);
   let raw: unknown;
   try {
     raw = JSON.parse(boundary.fs.read(configPath));

@@ -8,11 +8,11 @@
 import chalk from 'chalk';
 import { Command, InvalidArgumentError } from 'commander';
 import { nodeBoundary, type Boundary } from './boundary.js';
-import { cleanVariants } from './clean.js';
+import { listBundles, provisionBundles, pruneBundles, removeBundles } from './bundles.js';
 import { runInit } from './init.js';
 import { otaInstall, reindex } from './ota.js';
 import { clackPrompter } from './prompts.js';
-import { JetbridgeError, loadProject, type Project } from './project.js';
+import { JetbridgeError, fail, loadProject, type Project } from './project.js';
 import { simInstall } from './sim.js';
 import { assertSingleSegment, displayNameFor, sanitizeName, sanitizeSuffix } from './variant.js';
 import { branchSuffix } from './git.js';
@@ -60,11 +60,15 @@ program
   .name('jetbridge')
   .description('Build, sign and deliver iOS dev builds — to a simulator, a cable, or your bucket.')
   .option('--config-file <path>', 'use this config file instead of the nearest one')
+  // Never REQUIRED: behind a pipe the unattended path is already automatic, so
+  // an agent needs no flag and no environment variable. This is for a person on
+  // a terminal who wants it anyway.
+  .option('--non-interactive', 'never prompt, even on a terminal')
   .showHelpAfterError();
 
 /** Resolved per command, so `--config-file` on the root still applies. */
 const open = (): { boundary: Boundary; project: Project } => {
-  const boundary = nodeBoundary();
+  const boundary = nodeBoundary({ nonInteractive: Boolean(program.opts().nonInteractive) });
   const configPath = program.opts().configFile as string | undefined;
   return { boundary, project: loadProject(boundary, { configPath }) };
 };
@@ -108,7 +112,7 @@ program
   .option('--ota-endpoint <url>', 'for an S3-compatible host (R2, MinIO, Backblaze)')
   .option('--ota-public-base-url <url>', 'where uploaded builds are readable (https only)')
   .action(async (options) => {
-    const boundary = nodeBoundary();
+    const boundary = nodeBoundary({ nonInteractive: Boolean(program.opts().nonInteractive) });
     const result = await runInit(
       boundary,
       {
@@ -132,55 +136,81 @@ program
     } else console.error(chalk.dim('nothing written'));
   });
 
-program
-  .command('sim')
-  .description('build and launch on a simulator (no signing, so a variant needs no credentials)')
-  .option(SUFFIX_FLAG, SUFFIX_HELP, parseSuffix)
-  .option(NAME_FLAG, NAME_HELP, parseName)
-  .option('-d, --device <id>', 'simulator name or udid')
-  .option('-c, --config <name>', 'build configuration')
-  .option('--clean', 'wipe cached DerivedData first')
-  .action(async (options) => {
-    const { boundary, project } = open();
-    await simInstall(boundary, project, {
-      ...resolveVariant(boundary, project, options),
-      device: options.device,
-      configuration: options.config,
-      clean: Boolean(options.clean),
-    });
-  });
+/**
+ * Where the build goes.
+ *
+ * Both flags take an OPTIONAL value, so one flag answers two questions:
+ * `--device` means the cable, and `--device <id>` means that phone. The
+ * simulator is the default because it is the only route that needs no
+ * credentials, no signing and no paired hardware — a first command on a new
+ * machine always works.
+ */
+function resolveDestination(options: { device?: string | boolean; simulator?: string | boolean }): {
+  kind: 'device' | 'simulator';
+  id: string;
+} {
+  const wantsDevice = options.device !== undefined;
+  const wantsSimulator = options.simulator !== undefined;
+  // Inside an action handler, so `fail` — a commander parse error here would
+  // print a stack instead of the one line an expected failure gets.
+  if (wantsDevice && wantsSimulator) fail('pass --device or --simulator, not both');
+  const chosen = wantsDevice ? options.device : options.simulator;
+  return {
+    kind: wantsDevice ? 'device' : 'simulator',
+    id: typeof chosen === 'string' ? chosen : '',
+  };
+}
 
 program
-  .command('wired')
-  .description('build and install over the cable to every reachable paired device')
+  .command('install')
+  .description('build and install — on a simulator by default, or over the cable with --device')
   .option(SUFFIX_FLAG, SUFFIX_HELP, parseSuffix)
   .option(NAME_FLAG, NAME_HELP, parseName)
-  .option('-d, --device <id>', 'install to one device (identifier, name, udid or serial)')
-  .option('-c, --config <name>', 'build configuration')
+  .option('-d, --device [id]', 'install over the cable; give an id to pick one device')
+  .option('--simulator [name]', 'install on a simulator (the default); give a name or udid')
+  // `--configuration`, not `--config`: Xcode's own word, and one keystroke
+  // from the root `--config-file` is two meanings of "config" too close together.
+  .option('-c, --configuration <name>', 'build configuration')
   .option('--clean', 'wipe cached DerivedData first')
-  .option('--reprovision', 'bypass the profile cache and provision fresh')
+  .option('--reprovision', 'bypass the profile cache and provision fresh (--device only)')
   .action(async (options) => {
     const { boundary, project } = open();
+    const destination = resolveDestination(options);
+    const variant = resolveVariant(boundary, project, options);
+
+    if (destination.kind === 'simulator') {
+      if (options.reprovision) fail('--reprovision only applies to a --device install');
+      await simInstall(boundary, project, {
+        ...variant,
+        device: destination.id,
+        configuration: options.configuration,
+        clean: Boolean(options.clean),
+      });
+      return;
+    }
+
     await wiredInstall(boundary, project, {
-      ...resolveVariant(boundary, project, options),
-      device: options.device,
-      configuration: options.config,
+      ...variant,
+      device: destination.id,
+      configuration: options.configuration,
       clean: Boolean(options.clean),
       reprovision: Boolean(options.reprovision),
     });
   });
 
 program
-  .command('ota')
-  .description('archive, upload to your bucket, and print an install URL')
+  .command('link')
+  .description('archive, upload to your bucket, and print a link anyone can install from')
   .option(SUFFIX_FLAG, SUFFIX_HELP, parseSuffix)
   .option(NAME_FLAG, NAME_HELP, parseName)
-  .option('-c, --config <name>', 'build configuration')
+  // `--configuration`, not `--config`: Xcode's own word, and one keystroke
+  // from the root `--config-file` is two meanings of "config" too close together.
+  .option('-c, --configuration <name>', 'build configuration')
   .action(async (options) => {
     const { boundary, project } = open();
     const result = await otaInstall(boundary, project, {
       ...resolveVariant(boundary, project, options),
-      configuration: options.config,
+      configuration: options.configuration,
     });
     console.error('');
     console.error(chalk.green(`install: ${result.installUrl}`));
@@ -196,27 +226,69 @@ program
     console.error(chalk.green(`rebuilt: ${url}`));
   });
 
-program
-  .command('clean')
-  .description('remove variant bundle ids and profiles from the developer account')
-  .option('-s, --suffix <slug>', 'variant to remove; repeatable', (value: string, all: string[]) =>
-    all.concat(assertSingleSegmentLoose(value)),
-  )
-  .option('-a, --all', 'every registered variant')
-  .option('-y, --yes', 'actually delete (without this, the plan is printed and nothing changes)')
-  .action(async (options: { suffix: string[]; all?: boolean; yes?: boolean }) => {
+/**
+ * Everything this project has registered with Apple.
+ *
+ * A noun-first group, in the shape of `docker image ls/rm/prune`: the bare verb
+ * that used to live here said nothing about what it acted on, and what it acts
+ * on is permanent account state that Apple will not restore.
+ */
+const bundles = program
+  .command('bundles')
+  .description('variant bundle ids and profiles registered with Apple for this project');
+
+bundles
+  .command('ls', { isDefault: true })
+  .alias('list')
+  .description('what this project has registered')
+  .option('--json', 'machine-readable output')
+  .action(async (options: { json?: boolean }) => {
     const { boundary, project } = open();
-    await cleanVariants(boundary, project, {
-      suffixes: (options.suffix ?? []).map((value) => sanitizeSuffix(value, project.config)),
-      all: Boolean(options.all),
+    await listBundles(boundary, project, { json: Boolean(options.json) });
+  });
+
+bundles
+  .command('provision [slug]')
+  .description('register and refresh profiles now, without building')
+  .action(async (slug: string | undefined) => {
+    const { boundary, project } = open();
+    const variant = resolveVariant(boundary, project, { suffix: slug ?? true });
+    await provisionBundles(boundary, project, variant);
+  });
+
+bundles
+  .command('rm <slug...>')
+  .description('remove these variants by name')
+  .option('-y, --yes', 'actually delete (without this, the plan is printed and nothing changes)')
+  .action(async (slugs: string[], options: { yes?: boolean }) => {
+    // Validate the arguments BEFORE loading the config: a variadic argument
+    // gets no commander parser, and checking afterwards means a typo outside a
+    // project is reported as a missing config file — the wrong problem.
+    for (const slug of slugs) assertSingleSegmentLoose(slug);
+    const { boundary, project } = open();
+    await removeBundles(boundary, project, {
+      suffixes: slugs.map((value) => sanitizeSuffix(value, project.config)),
       yes: Boolean(options.yes),
     });
   });
 
-/** The project is not loaded yet when commander parses this option. */
+bundles
+  .command('prune')
+  .description('remove variants whose git branch is gone from the remote')
+  .option('-y, --yes', 'actually delete (without this, the plan is printed and nothing changes)')
+  .action(async (options: { yes?: boolean }) => {
+    const { boundary, project } = open();
+    await pruneBundles(boundary, project, { yes: Boolean(options.yes) });
+  });
+
+/**
+ * The config is not loaded yet, so the base bundle id cannot be quoted back —
+ * but a pasted bundle id still has to be refused rather than flattened into one
+ * absurd segment.
+ */
 function assertSingleSegmentLoose(value: string): string {
   if (value.includes('.')) {
-    throw new InvalidArgumentError('just the last segment of the bundle id');
+    fail(`"${value}": just the last segment — the full bundle id is built for you (e.g. "wave")`);
   }
   return value;
 }
