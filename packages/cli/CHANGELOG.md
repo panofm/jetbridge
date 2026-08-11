@@ -4,24 +4,16 @@
 
 ### Minor Changes
 
-- [`3a31835`](https://github.com/panofm/jetbridge/commit/3a31835af9196992deb6804b98a9e1c661287145) Thanks [@adamazad](https://github.com/adamazad)! - Every command now reports what it is doing while it does it. The app, its bundle id and its configuration, the devices, and the profiles that will sign the build are printed BEFORE anything slow starts — so a wrong `--suffix` costs a second instead of a full build — and each slow phase is a timed step that announces itself and rewrites its own line when it finishes. Nothing is silent for minutes, and the build number is reported with where the same number appears on the phone. Without a terminal, each step prints one plain line and no escape codes.
+First release candidate. Build, sign and deliver iOS dev builds from one config file.
 
-  `--json` on any command puts newline-delimited events on **stdout**, one object per line, while every human line stays on **stderr** — so a script can pipe stdout to a parser while a person watches the run. Events cover the start, the resolved devices, the signing decision and which profiles it used, each step with its duration in milliseconds, each per-device install, the `link` URLs, and a final `done` with the total and an `ok` flag. A failure emits `error` and then `done` with `"ok": false`, and the exit code stays non-zero. `bundles ls --json` keeps its existing array output unchanged.
+- `jetbridge install` puts a build on a simulator, or on a cabled phone with `--device`. `jetbridge link` uploads it and prints a link anyone can install from. `jetbridge init` writes the config by reading your Xcode project.
+- Variant builds give a branch its own bundle id and home-screen label, so two branches install side by side instead of overwriting each other.
+- Over-the-air delivery uploads to any S3-compatible bucket you own, and fetches the manifest back over HTTPS before printing a link — a bucket that is not publicly readable answers 403, and iOS reports only "Cannot connect".
+- `jetbridge bundles ls / provision / rm / prune` manages what those variants register with Apple. Deleting is a dry run by default, and pruning aborts if the git remote cannot be reached, because offline must never read as "every branch is gone".
+- Bundle ids, capabilities and provisioning profiles are registered through the App Store Connect API directly, because `xcodebuild -allowProvisioningUpdates` cannot register a new bundle id headlessly.
+- The config holds decisions only. Build configurations, each target's entitlements and bundle-id segment, and the capabilities to register are read from the Xcode project itself. Secrets are referenced as `${VAR}` and never held.
+- Your project consumes five fixed build settings: `JETBRIDGE_SUFFIX`, `JETBRIDGE_DISPLAY_NAME`, `JETBRIDGE_SIGN_STYLE`, `JETBRIDGE_GIT_SHA` and `JETBRIDGE_PROFILE_<TARGET>`.
+- Every command reports timed steps while it works, prints the identity and signing decision before anything slow, and takes `--json` for scripts and agents.
+- Every command runs unattended: no `CI` variable to set, nothing prompts when there is nobody to ask, and no child process can inherit an open stdin and hang.
 
-  Build hook output is captured rather than inherited, and quoted on failure — a hook that printed its own banner used to repeat the line the runner had just drawn.
-
-  Everything a step prints from inside itself — one line per profile provisioned — is now indented under that step instead of landing on its half-drawn line, and the step column is sized to the run's own labels so one long device name cannot push every other duration out of alignment. Progress lines are no longer dropped without a terminal: a redirected log now carries every one of them, in order, with no escape codes.
-
-### Patch Changes
-
-- [`b99becf`](https://github.com/panofm/jetbridge/commit/b99becf5235d5426b3a243a42a0a7d65e95076aa) Thanks [@adamazad](https://github.com/adamazad)! - Fixes over-the-air delivery failing with "There are no current certificates on this team matching the provided certificate IDs compatible with IOS_APP_ADHOC profiles".
-
-  The certificate kind now follows the profile type: a development profile embeds a development certificate, ad hoc and in-house embed a distribution one. Requesting an ad hoc profile while looking up a development certificate is a pairing Apple rejects, with a 409 that reads like a missing certificate rather than the wrong kind of one.
-
-  `ota.exportMethod` gains `development`, and it is now the default. It produces an `.ipa` that installs over the air on every device named in the profile, signed with the certificate every Apple developer already has — where `ad-hoc` and `enterprise` need a distribution certificate the team may never have issued. When one is genuinely missing, the error now says which setting avoids needing it.
-
-- [`6f6c3f6`](https://github.com/panofm/jetbridge/commit/6f6c3f6a81a0fc042ccab451e3a0a7bc9a08ea70) Thanks [@adamazad](https://github.com/adamazad)! - Reads `.env.local` and `.env` from the project root, so App Store Connect credentials no longer have to be exported by hand before every command.
-
-  Git worktrees are handled too: a worktree has its own root but no `.env.local` — the file lives only in the main checkout and is git-ignored, so it never propagates. Without the fallback, every build from a worktree looked credential-less on a machine that was configured correctly.
-
-  A file never overwrites a variable that is already set, so exporting one still wins.
+Verified end to end against a real project: a cabled variant install to two devices, and an over-the-air build uploaded and served from its bucket.
