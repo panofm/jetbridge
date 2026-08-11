@@ -111,6 +111,8 @@ export interface AscResource {
 
 export interface AscDocument {
   data?: AscResource | AscResource[];
+  /** Apple pages at 200 and puts the next page here, as an absolute URL. */
+  links?: { next?: string };
   errors?: Array<{ code?: string; title?: string; detail?: string }>;
 }
 

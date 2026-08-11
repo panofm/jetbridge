@@ -16,7 +16,14 @@
  * it as a variant, and `assertDeletable` checks again immediately before every
  * DELETE. Losing it breaks signing for every build this project ever makes.
  */
-import { asArray, connect, type AscClient, type AscDocument } from './asc.js';
+import {
+  asArray,
+  connect,
+  type AscClient,
+  type AscDocument,
+  type AscResource,
+  type AscResponse,
+} from './asc.js';
 import type { Boundary } from './boundary.js';
 import { resolveTargets, type ResolvedTarget } from './bundle-ids.js';
 import { labelPrefixFor, type Config } from './config.js';
@@ -82,15 +89,42 @@ export function assertDeletable(
   }
 }
 
-export async function fetchBundleIds(client: AscClient): Promise<RegisteredBundleId[]> {
-  const result = await client.request<AscDocument>('GET', '/v1/bundleIds?limit=200');
-  if (result.status !== 200) {
-    fail(
-      `could not list bundle ids (HTTP ${result.status}).\n` +
-        '  Check that the App Store Connect key still has access to this team.',
-    );
+/**
+ * Every page, not the first one.
+ *
+ * Apple caps a page at 200 and hands back `links.next`. Reading one page looks
+ * like it works — an account under the cap is complete, and one over it is
+ * quietly partial. That is the worst shape for `prune`: it classifies only what
+ * it saw, so it under-deletes, reports a total that shrinks by less than it
+ * deleted, and a listing that does not change when you remove something.
+ */
+async function fetchAllPages(
+  client: AscClient,
+  what: string,
+  firstPath: string,
+): Promise<AscResource[]> {
+  const rows: AscResource[] = [];
+  let path: string | undefined = firstPath;
+  // Bounded: a malformed `next` that pointed at itself would otherwise spin.
+  for (let page = 0; path && page < 50; page += 1) {
+    const result: AscResponse<AscDocument> = await client.request<AscDocument>('GET', path);
+    if (result.status !== 200) {
+      fail(
+        `could not list ${what} (HTTP ${result.status}).\n` +
+          '  Check that the App Store Connect key still has access to this team.',
+      );
+    }
+    rows.push(...asArray(result.body.data));
+    const next = result.body.links?.next;
+    // `next` is absolute; the client takes a path.
+    path = next ? next.replace(/^https:\/\/api\.appstoreconnect\.apple\.com/, '') : undefined;
   }
-  return asArray(result.body.data).map((row) => ({
+  return rows;
+}
+
+export async function fetchBundleIds(client: AscClient): Promise<RegisteredBundleId[]> {
+  const rows = await fetchAllPages(client, 'bundle ids', '/v1/bundleIds?limit=200');
+  return rows.map((row) => ({
     id: row.id,
     identifier: String(row.attributes.identifier ?? ''),
     name: String(row.attributes.name ?? ''),
@@ -98,14 +132,8 @@ export async function fetchBundleIds(client: AscClient): Promise<RegisteredBundl
 }
 
 export async function fetchProfiles(client: AscClient): Promise<RegisteredProfile[]> {
-  const result = await client.request<AscDocument>('GET', '/v1/profiles?limit=200');
-  if (result.status !== 200) {
-    fail(
-      `could not list provisioning profiles (HTTP ${result.status}).\n` +
-        '  Check that the App Store Connect key still has access to this team.',
-    );
-  }
-  return asArray(result.body.data).map((row) => ({
+  const rows = await fetchAllPages(client, 'provisioning profiles', '/v1/profiles?limit=200');
+  return rows.map((row) => ({
     id: row.id,
     name: String(row.attributes.name ?? ''),
     createdDate: String(row.attributes.createdDate ?? ''),

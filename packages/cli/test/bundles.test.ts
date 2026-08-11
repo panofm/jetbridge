@@ -9,6 +9,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   assertDeletable,
+  fetchBundleIds,
   firstSeen,
   groupVariants,
   listBundles,
@@ -160,6 +161,59 @@ const targets: ResolvedTarget[] = [
   { name: 'Upload Widget', bundleIdSuffix: 'uploadwidget' },
 ];
 const protectedIds = protectedBundleIds(targets, config);
+
+describe('reading every page', () => {
+  /**
+   * Apple caps a page at 200 and hands back `links.next`. Reading one page
+   * looks like it works — an account under the cap is complete, one over it is
+   * quietly partial. A real account had more than 200: `prune` classified only
+   * the first page, so it deleted less than it reported, and the listing did
+   * not shrink when something was removed.
+   */
+  const page = (ids: string[], next?: string) => ({
+    status: 200,
+    body: {
+      data: ids.map((id) => ({
+        id,
+        type: 'bundleIds',
+        attributes: { identifier: `io.acme.app.dev.${id}`, name: id },
+      })),
+      ...(next ? { links: { next } } : {}),
+    },
+  });
+
+  it('follows links.next until there is none', async () => {
+    const calls: string[] = [];
+    const client = {
+      async request(_method: string, path: string) {
+        calls.push(path);
+        if (path.includes('page=2')) return page(['c']);
+        if (path.includes('page=1')) {
+          return page(['b'], 'https://api.appstoreconnect.apple.com/v1/bundleIds?page=2');
+        }
+        return page(['a'], 'https://api.appstoreconnect.apple.com/v1/bundleIds?page=1');
+      },
+    } as unknown as Parameters<typeof fetchBundleIds>[0];
+
+    const rows = await fetchBundleIds(client);
+    expect(rows.map((r) => r.id)).toEqual(['a', 'b', 'c']);
+    expect(calls).toHaveLength(3);
+    // The client takes a path; `next` arrives absolute.
+    expect(calls[1]).toBe('/v1/bundleIds?page=1');
+  });
+
+  it('stops at one page when there is no next link', async () => {
+    const calls: string[] = [];
+    const client = {
+      async request(_method: string, path: string) {
+        calls.push(path);
+        return page(['only']);
+      },
+    } as unknown as Parameters<typeof fetchBundleIds>[0];
+    expect((await fetchBundleIds(client)).map((r) => r.id)).toEqual(['only']);
+    expect(calls).toHaveLength(1);
+  });
+});
 
 describe('protectedBundleIds', () => {
   it('covers the base id and the extensions the plain build ships', () => {
