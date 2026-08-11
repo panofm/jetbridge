@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # One job, not five. A job bills a whole minute even when the script takes
+  # eight seconds, so splitting these checks apart costs money before any of
+  # them does work.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: No private identifiers
+        run: node scripts/check-no-private-identifiers.mjs
+      - run: npx tsc --noEmit
+      - run: npx eslint .
+      - run: npx prettier --check .
+      - run: npx vitest run
+      - name: Build the package
+        run: npm run build

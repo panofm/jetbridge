@@ -1,11 +1,5 @@
 {
-  "note": "Captured from the pre-extraction bun implementation. Identifiers are swapped via the tokenMap below; the algorithm is word-based, so the swap is exact as long as the replacement words carry the same noise-word status.",
-  "tokenMap": {
-    "pano": "acme",
-    "Pano": "Acme",
-    "fm": "io",
-    "fm.pano.app.dev": "io.acme.app.dev"
-  },
+  "note": "Captured from the implementation this package was extracted from, by running every pure name-derivation transform over an input matrix. Project identifiers were replaced with neutral ones; the algorithm is word-based, so the replacement is exact as long as the substituted words carry the same noise-word status. The port must reproduce this file exactly.",
   "noiseWords": [
     "feat",
     "fix",
