@@ -20,6 +20,10 @@ import {
 import { projectFrom, type Project } from '../src/project.js';
 import { testConfig } from './helpers/config.js';
 import { fakeBoundary, type FakeBoundary } from './helpers/fake-boundary.js';
+import { PROJECT_FILES } from './helpers/pbxproj.js';
+
+/** Reads the project file, which is where the extension bundle ids live. */
+const readsProject = (): FakeBoundary => fakeBoundary({ files: PROJECT_FILES });
 
 const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
 const KEY_PEM = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
@@ -109,7 +113,7 @@ describe('buildArgs', () => {
       },
     });
     const args = buildArgs(
-      fakeBoundary(),
+      readsProject(),
       project,
       request({
         suffix: 'wave',
@@ -243,14 +247,18 @@ describe('requireToolchain', () => {
   it('names the missing project and points at the config', async () => {
     const boundary = fakeBoundary({ commands: [{ match: ['command', '-v'] }] });
     await expect(requireToolchain(boundary, projectOf(), [])).rejects.toThrow(
-      /missing \/w\/ios\/Acme\.xcodeproj\.\n {2}Check project\.xcodeproj in the config\./,
+      /missing \/w\/ios\/Acme\.xcodeproj\.\n {2}Check project\.iosDir and project\.xcodeproj in the config\./,
     );
   });
 
   it('tells a generated project to generate first', async () => {
-    const boundary = fakeBoundary({ commands: [{ match: ['command', '-v'] }] });
-    const project = projectOf({ project: { projectYml: 'project.yml' } });
-    await expect(requireToolchain(boundary, project, [])).rejects.toThrow(
+    // A spec beside the project means the .xcodeproj is generated output, so
+    // the fix is to generate it rather than to correct a path.
+    const boundary = fakeBoundary({
+      commands: [{ match: ['command', '-v'] }],
+      files: { '/w/ios/project.yml': 'name: Acme\n' },
+    });
+    await expect(requireToolchain(boundary, projectOf(), [])).rejects.toThrow(
       /Generate the project first, then re-run\./,
     );
   });
@@ -264,8 +272,11 @@ describe('generateProject', () => {
   });
 
   it('runs xcodegen in the Xcode project directory', async () => {
-    const boundary = fakeBoundary({ commands: [{ match: ['xcodegen', 'generate'] }] });
-    const project = projectOf({ project: { xcodegen: true, projectYml: 'project.yml' } });
+    const boundary = fakeBoundary({
+      commands: [{ match: ['xcodegen', 'generate'] }],
+      files: { '/w/ios/project.yml': 'name: Acme\n' },
+    });
+    const project = projectOf({ project: { xcodegen: true } });
     await generateProject(boundary, project);
     const call = boundary.findCall('xcodegen', 'generate')!;
     expect(call.args).toEqual(['generate']);
@@ -275,8 +286,9 @@ describe('generateProject', () => {
   it('fails loudly, carrying xcodegen output', async () => {
     const boundary = fakeBoundary({
       commands: [{ match: ['xcodegen'], code: 1, stderr: 'Spec parsing error: no such target\n' }],
+      files: { '/w/ios/project.yml': 'name: Acme\n' },
     });
-    const project = projectOf({ project: { xcodegen: true, projectYml: 'project.yml' } });
+    const project = projectOf({ project: { xcodegen: true } });
     await expect(generateProject(boundary, project)).rejects.toThrow(
       /xcodegen failed:\nSpec parsing error: no such target/,
     );

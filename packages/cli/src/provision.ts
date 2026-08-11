@@ -21,9 +21,11 @@ import {
 } from './asc.js';
 import type { Boundary } from './boundary.js';
 import { capabilitiesFor } from './capabilities.js';
+import { resolveTargets, type ResolvedTarget } from './bundle-ids.js';
 import { labelPrefixFor, type Config, type TargetConfig } from './config.js';
 import { fail, type Project } from './project.js';
 import { ascEntityName, bundleIdFor } from './variant.js';
+import { targetEntitlements } from './xcodeproject.js';
 
 /** Where Xcode reads installed profiles from. */
 export const profileDirectory = (boundary: Boundary): string =>
@@ -239,7 +241,7 @@ export async function ensureProfile(
 }
 
 /** `<base>.<slug>` for the app; the app's id plus one segment for an extension. */
-export function targetBundleId(target: TargetConfig, suffix: string, config: Config): string {
+export function targetBundleId(target: ResolvedTarget, suffix: string, config: Config): string {
   const appId = bundleIdFor(suffix, config);
   return target.bundleIdSuffix ? `${appId}.${target.bundleIdSuffix}` : appId;
 }
@@ -249,11 +251,11 @@ export function targetBundleId(target: TargetConfig, suffix: string, config: Con
  * label so there is one spelling of the convention — the extension gets the
  * app's name plus its own, which is what makes a list of bundle ids readable.
  */
-export function targetEntityName(target: TargetConfig, displayName: string): string {
+export function targetEntityName(target: ResolvedTarget, displayName: string): string {
   return ascEntityName(target.bundleIdSuffix ? `${displayName} ${target.name}` : displayName);
 }
 
-export function profileNameFor(target: TargetConfig, suffix: string, config: Config): string {
+export function profileNameFor(target: ResolvedTarget, suffix: string, config: Config): string {
   const prefix = config.variant.profilePrefix ?? labelPrefixFor(config);
   return `${prefix} ${suffix} ${target.bundleIdSuffix ?? 'app'}`;
 }
@@ -268,7 +270,7 @@ export async function provisionVariant(
   options: ProvisionOptions,
 ): Promise<ProvisionedProfile[]> {
   const { config } = project;
-  const targets = config.variant.targets;
+  const targets = resolveTargets(boundary, project);
   if (targets.length === 0) {
     fail(
       'a variant build needs at least one entry in variant.targets — the app itself, and any ' +
@@ -280,6 +282,10 @@ export async function provisionVariant(
   const client = connect(boundary, config);
   const profileType = options.profileType ?? 'IOS_APP_DEVELOPMENT';
 
+  // Read once for the run: every target's entitlements come out of one parse of
+  // the project file.
+  const shipping = targetEntitlements(boundary, project);
+
   const registered: Array<{ target: TargetConfig; bundleId: string; rowId: string }> = [];
   for (const target of targets) {
     const bundleId = targetBundleId(target, options.suffix, config);
@@ -289,7 +295,11 @@ export async function provisionVariant(
       bundleId,
       targetEntityName(target, options.displayName),
     );
-    await ensureCapabilities(client, rowId, capabilitiesFor(boundary, project, target));
+    await ensureCapabilities(
+      client,
+      rowId,
+      capabilitiesFor(boundary, project, target, shipping[target.name]?.rootRelative),
+    );
     registered.push({ target, bundleId, rowId });
   }
 

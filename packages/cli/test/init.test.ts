@@ -157,12 +157,7 @@ describe('assembleConfig', () => {
     scheme: 'Acme',
     teamId: 'ABCDE12345',
     baseBundleId: 'io.acme.app.dev',
-    configurations: {
-      available: ['Debug', 'Release'],
-      wired: 'Debug',
-      sim: 'Debug',
-      archive: 'Release',
-    },
+    configurations: { wired: 'Debug', sim: 'Debug', archive: 'Release' },
     displayName: 'Acme Dev',
     targets: [{ name: 'Acme' }],
     credentials: { ascKeyId: 'ASC_API_KEY_ID', ascIssuerId: 'ASC_API_ISSUER_ID' },
@@ -249,12 +244,23 @@ describe('the interactive flow', () => {
     const h = harness();
     const { prompts } = await run(h, fullAnswers);
     expect(prompts.asked).not.toContain('configurations.wired');
+    // The list of configurations is NOT written — it is the project's to state.
     expect(JSON.parse(written(h.boundary)).configurations).toEqual({
-      available: ['Debug', 'Release'],
       wired: 'Debug',
       sim: 'Debug',
       archive: 'Release',
     });
+  });
+
+  it('writes neither list the project already states', async () => {
+    // Both were config fields once. A copy of a project fact goes stale, and a
+    // stale copy refuses a build that works or patches a line that moved.
+    const h = harness();
+    await run(h, fullAnswers);
+    const raw = written(h.boundary);
+    expect(raw).not.toContain('"available"');
+    expect(raw).not.toContain('"entitlements"');
+    expect(JSON.parse(raw).variant.targets).toEqual([{ name: 'Acme' }]);
   });
 
   it('asks which configuration to use when the project has no Debug', async () => {
@@ -266,12 +272,7 @@ describe('the interactive flow', () => {
       'configurations.archive': 'Prod',
     });
     expect(prompts.asked).toContain('configurations.wired');
-    expect(result.config?.configurations).toEqual({
-      available: ['Dev', 'Staging', 'Prod'],
-      wired: 'Dev',
-      sim: 'Dev',
-      archive: 'Prod',
-    });
+    expect(result.config?.configurations).toEqual({ wired: 'Dev', sim: 'Dev', archive: 'Prod' });
   });
 
   it('carries the detected targets into the variant section', async () => {
@@ -638,12 +639,7 @@ describe('the repair pass', () => {
       baseBundleId: 'io.acme.app.dev',
       appIcon: 'ios/Acme/icon.png',
     },
-    configurations: {
-      available: ['Debug', 'Release'],
-      wired: 'Debug',
-      sim: 'Debug',
-      archive: 'Release',
-    },
+    configurations: { wired: 'Debug', sim: 'Debug', archive: 'Release' },
     variant: { displayName: 'Acme Dev', labelBudget: 11, targets: [{ name: 'Acme' }] },
     hooks: { preBuild: 'npm run bundle' },
   };

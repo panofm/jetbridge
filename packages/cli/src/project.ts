@@ -10,6 +10,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { Boundary } from './boundary.js';
 import { CONFIG_FILENAMES, formatConfigErrors, parseConfig, type Config } from './config.js';
 import { fail } from './errors.js';
+import { resolveXcodeproj } from './project-layout.js';
 
 // Re-exported so existing importers keep working; defined in errors.ts because
 // the boundary needs to throw without importing the layer above it.
@@ -53,11 +54,28 @@ export function projectFrom(configPath: string, config: Config): Project {
     config,
     path,
     iosPath,
-    xcodebuildTarget: () =>
-      config.project.xcworkspace
-        ? ['-workspace', iosPath(config.project.xcworkspace)]
-        : ['-project', iosPath(config.project.xcodeproj!)],
+    xcodebuildTarget: () => {
+      if (config.project.xcworkspace) {
+        return ['-workspace', iosPath(config.project.xcworkspace)];
+      }
+      if (!config.project.xcodeproj) {
+        // Only reachable for a generated project that has not been generated:
+        // resolution found a spec and no `.xcodeproj`, and deliberately let the
+        // run get this far so the message could be this one.
+        fail(
+          `no .xcodeproj in ${iosPath()} yet.\n` +
+            '  Generate the project first, then re-run — or set project.xcodegen to have ' +
+            'jetbridge do it.',
+        );
+      }
+      return ['-project', iosPath(config.project.xcodeproj)];
+    },
   };
+}
+
+/** A project from a config that has not been through the edge resolution yet. */
+export function projectAt(boundary: Boundary, configPath: string, config: Config): Project {
+  return projectFrom(configPath, resolveProjectFile(boundary, dirname(configPath), config));
 }
 
 export interface LoadOptions {
@@ -98,5 +116,20 @@ export function loadProject(boundary: Boundary, options: LoadOptions = {}): Proj
       `${configPath} is not a valid jetbridge config:\n${formatConfigErrors(result.errors)}`,
     );
   }
-  return projectFrom(configPath, result.config);
+  return projectAt(boundary, configPath, result.config);
+}
+
+/**
+ * Fill in the `.xcodeproj` the directory already names, once, here.
+ *
+ * Everything downstream reads `config.project.xcodeproj` — the pbxproj reader,
+ * the entitlement swap, `xcodebuildTarget` — so inferring it at the edge keeps
+ * all of them reading a single resolved value instead of each repeating the
+ * search.
+ */
+export function resolveProjectFile(boundary: Boundary, root: string, config: Config): Config {
+  const directory = resolve(root, config.project.iosDir);
+  const xcodeproj = resolveXcodeproj(boundary, directory, config.project);
+  if (xcodeproj === config.project.xcodeproj) return config;
+  return { ...config, project: { ...config.project, ...(xcodeproj ? { xcodeproj } : {}) } };
 }

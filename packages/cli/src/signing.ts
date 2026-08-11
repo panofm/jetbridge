@@ -5,7 +5,9 @@
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import type { Boundary } from './boundary.js';
-import type { Config, TargetConfig } from './config.js';
+import type { ResolvedTarget } from './bundle-ids.js';
+import { resolveTargets } from './bundle-ids.js';
+import type { Project } from './project.js';
 import { profileDirectory, profileNameFor } from './provision.js';
 
 export interface SigningProfiles {
@@ -14,17 +16,21 @@ export interface SigningProfiles {
 }
 
 /** `JETBRIDGE_PROFILE_APP` for the app, `JETBRIDGE_PROFILE_UPLOADWIDGET` for an extension. */
-export function profileSettingName(target: TargetConfig): string {
+export function profileSettingName(target: ResolvedTarget): string {
   const key = (target.bundleIdSuffix ?? 'app').toUpperCase().replace(/[^A-Z0-9]/g, '_');
   return `JETBRIDGE_PROFILE_${key}`;
 }
 
 /** Build settings that put the build on manual signing against our profiles. */
-export function signSettings(suffix: string, profiles: SigningProfiles, config: Config): string[] {
+export function signSettings(
+  suffix: string,
+  profiles: SigningProfiles,
+  targets: ResolvedTarget[],
+): string[] {
   // No variant means the project's own automatic signing, untouched.
   if (!suffix) return [];
   const settings = ['JETBRIDGE_SIGN_STYLE=Manual'];
-  for (const target of config.variant.targets) {
+  for (const target of targets) {
     const profile = profiles.byTarget[target.name];
     if (profile) settings.push(`${profileSettingName(target)}=${profile}`);
   }
@@ -103,17 +109,18 @@ const EXPIRY_MARGIN_MS = 24 * 60 * 60 * 1000;
  */
 export function cachedSigning(
   boundary: Boundary,
-  config: Config,
+  project: Project,
   options: { suffix: string; deviceUdids: string[]; now: number },
 ): SigningProfiles | null {
   try {
+    const config = project.config;
     const directory = profileDirectory(boundary);
     if (!boundary.fs.exists(directory)) return null;
     const identities = localSigningThumbprints(boundary);
     if (identities.size === 0) return null;
 
     const wanted = new Map(
-      config.variant.targets.map((target) => [
+      resolveTargets(boundary, project).map((target) => [
         profileNameFor(target, options.suffix, config),
         target.name,
       ]),

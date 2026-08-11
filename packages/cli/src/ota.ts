@@ -15,6 +15,7 @@
 import { join } from 'node:path';
 import { fillTemplate, readTemplate } from './assets.js';
 import type { Boundary } from './boundary.js';
+import { resolveTargets, type ResolvedTarget } from './bundle-ids.js';
 import {
   authArgs,
   buildNumber,
@@ -25,7 +26,7 @@ import {
   explainBuildFailure,
 } from './build.js';
 import type { Config, OtaConfig } from './config.js';
-import { withEntitlementSwap } from './entitlements.js';
+import { assertVariantEntitlements, withEntitlementSwap } from './entitlements.js';
 import {
   escapeHtml,
   itmsServicesUrl,
@@ -48,6 +49,7 @@ import {
 } from './storage.js';
 import { bundleIdFor } from './variant.js';
 import { derivedDataPath, scratchPath } from './wired.js';
+import { assertConfiguration } from './xcodeproject.js';
 
 /**
  * The profile a signed export needs.
@@ -374,7 +376,7 @@ export function archiveArgs(
     `CURRENT_PROJECT_VERSION=${request.buildNumber}`,
     ...(request.gitSha ? [`JETBRIDGE_GIT_SHA=${request.gitSha}`] : []),
     ...variantSettings(request.suffix, request.displayName),
-    ...signSettings(request.suffix, request.profiles, config),
+    ...signSettings(request.suffix, request.profiles, resolveTargets(boundary, project)),
     // Deliberately NOT setting CODE_SIGN_IDENTITY here, even though an ad hoc
     // profile needs a distribution one. A build setting on the xcodebuild
     // command line applies to EVERY target in the build, including each Swift
@@ -417,13 +419,14 @@ export function exportArgs(
 
 /** The bundle id → profile name map an export plist needs for a variant. */
 export function exportProfileMap(
+  targets: ResolvedTarget[],
   config: Config,
   suffix: string,
   profiles: SigningProfiles,
 ): Record<string, string> {
   if (!suffix) return {};
   const map: Record<string, string> = {};
-  for (const target of config.variant.targets) {
+  for (const target of targets) {
     const profile = profiles.byTarget[target.name];
     if (profile) map[targetBundleId(target, suffix, config)] = profile;
   }
@@ -557,16 +560,13 @@ export async function otaInstall(
   const { config } = project;
   const ota = requireOta(project);
   const configuration = options.configuration ?? config.configurations.archive;
-  if (!config.configurations.available.includes(configuration)) {
-    fail(
-      `"${configuration}" is not one of this project's build configurations ` +
-        `(${config.configurations.available.join(', ')})`,
-    );
-  }
+  assertConfiguration(boundary, project, configuration);
 
   // Before the slow steps: an unset bucket credential must not cost an archive
-  // and an export to discover.
+  // and an export to discover, and a variant entitlements path that points
+  // nowhere must not cost a registered bundle id.
   credentials(boundary, ota);
+  if (options.suffix) assertVariantEntitlements(boundary, project);
 
   const report = boundary.report;
   await requireToolchain(boundary, project, ['xcodebuild']);
@@ -648,7 +648,7 @@ export async function otaInstall(
   await withEntitlementSwap(
     boundary,
     project,
-    { suffix: options.suffix, backupPath: join(work, 'project.pbxproj.orig') },
+    { suffix: options.suffix, backupPath: join(work, 'project.pbxproj.orig'), configuration },
     () => runArchive(boundary, project, request),
   );
 
@@ -658,7 +658,12 @@ export async function otaInstall(
     renderExportOptionsPlist({
       teamId: config.project.teamId,
       method: ota.exportMethod,
-      provisioningProfiles: exportProfileMap(config, options.suffix, profiles),
+      provisioningProfiles: exportProfileMap(
+        resolveTargets(boundary, project),
+        config,
+        options.suffix,
+        profiles,
+      ),
     }),
   );
   const ipa = await runExport(boundary, project, { archivePath, exportDir, optionsPlist });

@@ -67,7 +67,6 @@ Every variant registers a bundle id and a profile with Apple, permanently. `jetb
 
   "project": {
     "iosDir": "ios",
-    "xcodeproj": "Acme.xcodeproj",
     "scheme": "Acme",
     "teamId": "ABCDE12345",
     "baseBundleId": "io.acme.app.dev",
@@ -75,10 +74,7 @@ Every variant registers a bundle id and a profile with Apple, permanently. `jetb
 
   "variant": {
     "displayName": "Acme Dev",
-    "targets": [
-      { "name": "Acme", "entitlements": "ios/Acme/Acme.entitlements" },
-      { "name": "UploadWidget", "bundleIdSuffix": "uploadwidget" },
-    ],
+    "targets": [{ "name": "Acme" }, { "name": "UploadWidget" }],
   },
 
   "credentials": {

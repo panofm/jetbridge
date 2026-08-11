@@ -45,8 +45,8 @@ export const CAPABILITY_BY_ENTITLEMENT: ReadonlyArray<readonly [string, string]>
  * grant, so deriving from the shipping file would request capabilities Apple
  * refuses — and the request, not the build, is what fails.
  */
-export const entitlementsPathFor = (target: TargetConfig): string | undefined =>
-  target.variantEntitlements ?? target.entitlements;
+export const entitlementsPathFor = (target: TargetConfig, shipping?: string): string | undefined =>
+  target.variantEntitlements ?? shipping;
 
 /**
  * Capabilities to enable on this target's registered bundle id.
@@ -61,8 +61,10 @@ export function capabilitiesFor(
   boundary: Boundary,
   project: Project,
   target: TargetConfig,
+  /** The target's shipping entitlements, as the project spells them. */
+  shipping?: string,
 ): string[] {
-  const relative = entitlementsPathFor(target);
+  const relative = entitlementsPathFor(target, shipping);
   if (!relative) return [];
   const path = project.path(relative);
   if (!boundary.fs.exists(path)) return [];

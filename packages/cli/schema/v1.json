@@ -16,15 +16,6 @@
           "minLength": 1,
           "type": "string"
         },
-        "available": {
-          "default": ["Debug", "Release"],
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
         "sim": {
           "default": "Debug",
           "minLength": 1,
@@ -190,10 +181,6 @@
           "minLength": 1,
           "type": "string"
         },
-        "projectYml": {
-          "minLength": 1,
-          "type": "string"
-        },
         "scheme": {
           "minLength": 1,
           "type": "string"
@@ -251,14 +238,6 @@
           "default": [],
           "items": {
             "properties": {
-              "bundleIdSuffix": {
-                "pattern": "^[a-z0-9]+$",
-                "type": "string"
-              },
-              "entitlements": {
-                "minLength": 1,
-                "type": "string"
-              },
               "name": {
                 "minLength": 1,
                 "type": "string"

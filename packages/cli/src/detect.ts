@@ -15,6 +15,7 @@
  */
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { Boundary } from './boundary.js';
+import { projectSpecName, xcodeprojNames } from './project-layout.js';
 
 /** A detected value and the file that produced it. */
 export interface Suggestion<T> {
@@ -384,9 +385,9 @@ export function detectProject(boundary: Boundary, options: DetectOptions): Detec
 
   const iosDir = relative(root, directory) || '.';
   const names = boundary.fs.isDirectory(directory) ? boundary.fs.readdir(directory) : [];
-  const projectName = names.find((name) => name.endsWith(XCODE_PROJECT_SUFFIX));
+  const projectName = xcodeprojNames(boundary, directory)[0];
   const workspaceName = names.find((name) => name.endsWith(XCODE_WORKSPACE_SUFFIX));
-  const specName = names.find((name) => name === 'project.yml' || name === 'project.yaml');
+  const specName = projectSpecName(boundary, directory);
 
   const detection: Detection = {
     root,

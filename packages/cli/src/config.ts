@@ -5,6 +5,18 @@
  *
  * Every value here was a hardcoded constant in the tool this package was
  * extracted from. Nothing project-specific is allowed back in as a default.
+ *
+ * A field that merely REPEATS the Xcode project does not belong here — it goes
+ * stale, and a stale copy refuses a build that works or patches a line that
+ * moved. Those are read from the project instead (see `xcodeproject.ts`).
+ *
+ * `project.teamId`, `project.baseBundleId` and `variant.displayName` look like
+ * exactly that and are NOT. They are the DEV build's identity, which is
+ * deliberately different from what the project declares for a release build: a
+ * separate bundle id so both can be installed at once, its own home-screen
+ * label, and sometimes another development team. Deriving them from the
+ * project would produce a dev build indistinguishable from the shipping one,
+ * which is the problem this tool exists to solve. Do not delete them.
  */
 import { z } from 'zod';
 
@@ -56,22 +68,27 @@ const relativePath = z
  * which is why a variant has to register more than one.
  */
 const targetSchema = z.object({
-  /** Xcode target name, as the project spells it. */
-  name: z.string().min(1),
   /**
-   * Appended to the app's variant bundle id. Omit for the app itself; an
-   * extension named `uploadwidget` becomes `<base>.<slug>.uploadwidget`.
+   * Xcode target name, as the project spells it.
+   *
+   * A SELECTION, not a duplication: a project has test targets and extensions
+   * that must not get variant treatment, and naming the ones that do is a
+   * decision nothing on disk can make. Everything else about a target — its
+   * bundle id, its entitlements — is read from the project.
    */
-  bundleIdSuffix: z
-    .string()
-    .regex(/^[a-z0-9]+$/, 'lowercase alphanumerics — it is one bundle-id segment')
-    .optional(),
-  /** Shipping entitlements, used by a plain build. */
-  entitlements: relativePath.optional(),
+  name: z.string().min(1),
   /**
    * Reduced entitlements for a variant. Capabilities the public API cannot
    * grant (app groups, Sign in with Apple) have to be dropped here, or signing
    * fails against a profile that does not carry them.
+   *
+   * Relative to the PROJECT ROOT — this config file's directory — like every
+   * other path here, and NOT to the Xcode project directory the way
+   * `CODE_SIGN_ENTITLEMENTS` is spelled. In practice it sits beside the
+   * shipping entitlements file the target already points at, so it takes that
+   * file's directory with `iosDir` on the front: a target pointing at
+   * `Acme/Acme.entitlements` wants `ios/Acme/Acme-variant.entitlements` here.
+   * The file has to exist, and a variant build says so before it builds.
    */
   variantEntitlements: relativePath.optional(),
 });
@@ -79,21 +96,29 @@ const targetSchema = z.object({
 const projectSchema = z.object({
   /** Directory holding the Xcode project, relative to the config file. */
   iosDir: relativePath.default('.'),
-  /** `.xcodeproj` name, relative to `iosDir`. */
+  /**
+   * `.xcodeproj` name, relative to `iosDir`. Inferred when the directory holds
+   * exactly one; set it only to settle which of several to build.
+   */
   xcodeproj: z.string().min(1).endsWith('.xcodeproj').optional(),
   /** `.xcworkspace` name, relative to `iosDir`. Takes precedence when set. */
   xcworkspace: z.string().min(1).endsWith('.xcworkspace').optional(),
+  /** A real choice: a project with more than one scheme cannot pick for you. */
   scheme: z.string().min(1),
+  /** The team a DEV build signs with — deliberately allowed to differ from the project's. */
   teamId: z.string().regex(/^[A-Z0-9]{10}$/, 'an Apple team id is 10 uppercase alphanumerics'),
+  /** The dev build's own identity, not the id the project ships under. */
   baseBundleId: z
     .string()
     .regex(
       /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/,
       'a reverse-DNS bundle id, e.g. com.example.app.dev',
     ),
-  /** XcodeGen spec, relative to `iosDir`. Only set when the project is generated. */
-  projectYml: relativePath.optional(),
-  /** Re-run XcodeGen before building. Requires `projectYml`. */
+  /**
+   * Re-run XcodeGen before building. A real choice — the spec is found beside
+   * the project, but whether to regenerate from it on every build is not
+   * something the directory can answer.
+   */
   xcodegen: z.boolean().default(false),
   /** Icon shown on the OTA install page, relative to the project root. */
   appIcon: relativePath.optional(),
@@ -108,9 +133,12 @@ const projectSchema = z.object({
     .default(['iPhone']),
 });
 
+/**
+ * Which configuration each destination builds. Not WHICH EXIST — that is in the
+ * pbxproj, and a second copy here goes stale and refuses a build that works.
+ * Each of these is checked against the project itself at build time.
+ */
 const configurationsSchema = z.object({
-  /** Build configurations that exist in the project. Validated before building. */
-  available: z.array(z.string().min(1)).min(1).default(['Debug', 'Release']),
   /** Cabled installs default to a debuggable build — it is the inner loop. */
   wired: z.string().min(1).default('Debug'),
   sim: z.string().min(1).default('Debug'),
@@ -119,7 +147,10 @@ const configurationsSchema = z.object({
 });
 
 const variantSchema = z.object({
-  /** Home-screen label for a plain build, e.g. what the project already sets. */
+  /**
+   * Home-screen label for a plain build. The dev build's identity, deliberately
+   * allowed to differ from what the project declares for release.
+   */
   displayName: z.string().min(1),
   /** Prefix for a variant label: `<prefix> Seeded Feed`. Defaults to displayName's first word. */
   labelPrefix: z.string().min(1).optional(),
@@ -237,53 +268,16 @@ export const configSchema = z
     git: gitSchema.prefault({}),
   })
   .superRefine((config, ctx) => {
-    const { available, wired, sim, archive } = config.configurations;
-    for (const [field, value] of Object.entries({ wired, sim, archive })) {
-      if (!available.includes(value)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['configurations', field],
-          message: `"${value}" is not in configurations.available (${available.join(', ')})`,
-        });
-      }
-    }
-    if (config.project.xcodegen && !config.project.projectYml) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['project', 'projectYml'],
-        message:
-          'project.xcodegen is on, so project.projectYml must say which spec to generate from',
-      });
-    }
-    if (!config.project.xcodeproj && !config.project.xcworkspace) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['project', 'xcodeproj'],
-        message: 'set project.xcodeproj or project.xcworkspace',
-      });
-    }
-    // Exactly one target is the app itself. Two would both claim the app's
-    // bundle id and silently overwrite each other's profile.
-    const appTargets = config.variant.targets.filter((t) => !t.bundleIdSuffix);
-    if (config.variant.targets.length > 0 && appTargets.length !== 1) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['variant', 'targets'],
-        message:
-          appTargets.length === 0
-            ? 'one target must be the app itself — leave its bundleIdSuffix unset'
-            : `only one target can be the app itself; ${appTargets
-                .map((t) => t.name)
-                .join(' and ')} both leave bundleIdSuffix unset`,
-      });
-    }
-    const suffixes = config.variant.targets.map((t) => t.bundleIdSuffix ?? '');
-    const duplicate = suffixes.find((s, i) => suffixes.indexOf(s) !== i);
+    // Everything else a target claims — its bundle id, whether it is the app —
+    // is read from the pbxproj, where a contradiction is a project error and is
+    // reported against the project rather than against this file.
+    const names = config.variant.targets.map((target) => target.name);
+    const duplicate = names.find((name, index) => names.indexOf(name) !== index);
     if (duplicate !== undefined) {
       ctx.addIssue({
         code: 'custom',
         path: ['variant', 'targets'],
-        message: `two targets share the bundleIdSuffix "${duplicate}"`,
+        message: `two targets share the name "${duplicate}"`,
       });
     }
   });

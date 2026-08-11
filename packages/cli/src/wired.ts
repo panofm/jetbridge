@@ -15,11 +15,12 @@ import {
   runHook,
 } from './build.js';
 import { describeTargets, pairedDevices, resolveTargets, type InstallTarget } from './devices.js';
-import { withEntitlementSwap } from './entitlements.js';
+import { assertVariantEntitlements, withEntitlementSwap } from './entitlements.js';
 import { fail, type Project } from './project.js';
 import { provisionVariant } from './provision.js';
 import { cachedSigning, type SigningProfiles } from './signing.js';
 import { bundleIdFor } from './variant.js';
+import { assertConfiguration } from './xcodeproject.js';
 
 export interface WiredOptions {
   /** Stream the full xcodebuild log instead of the quiet one. */
@@ -97,7 +98,7 @@ function signingPlan(
 
   const cached = options.reprovision
     ? null
-    : cachedSigning(boundary, project.config, {
+    : cachedSigning(boundary, project, {
         suffix: options.suffix,
         deviceUdids: targets.map((target) => target.udid),
         now: boundary.now(),
@@ -129,18 +130,16 @@ export async function wiredInstall(
 ): Promise<void> {
   const { config } = project;
   const configuration = options.configuration ?? config.configurations.wired;
-  if (!config.configurations.available.includes(configuration)) {
-    fail(
-      `"${configuration}" is not one of this project's build configurations ` +
-        `(${config.configurations.available.join(', ')})`,
-    );
-  }
+  assertConfiguration(boundary, project, configuration);
   if (options.suffix && !localCredentials(boundary, config)) {
     fail(
       'a variant build has to register a new bundle id, which needs App Store Connect ' +
         'credentials.\n  Drop the variant to build the plain bundle id instead.',
     );
   }
+  // Before provisioning, not when the swap runs: a wrong path would otherwise
+  // surface after a bundle id and a profile were already registered at Apple.
+  if (options.suffix) assertVariantEntitlements(boundary, project);
 
   const report = boundary.report;
   await requireToolchain(boundary, project, ['xcodebuild', 'xcrun']);
@@ -222,7 +221,7 @@ export async function wiredInstall(
   const appPath = await withEntitlementSwap(
     boundary,
     project,
-    { suffix: options.suffix, backupPath: join(scratch, 'project.pbxproj.orig') },
+    { suffix: options.suffix, backupPath: join(scratch, 'project.pbxproj.orig'), configuration },
     async () => {
       const request = {
         configuration,

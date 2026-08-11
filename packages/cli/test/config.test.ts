@@ -35,7 +35,6 @@ describe('defaults', () => {
     expect(result.config.project.iosDir).toBe('.');
     expect(result.config.project.xcodegen).toBe(false);
     expect(result.config.configurations).toEqual({
-      available: ['Debug', 'Release'],
       wired: 'Debug',
       sim: 'Debug',
       archive: 'Release',
@@ -70,13 +69,6 @@ describe('rejections', () => {
     );
   });
 
-  it('requires either an xcodeproj or an xcworkspace', () => {
-    const { xcodeproj: _drop, ...project } = minimal.project;
-    expect(errorsFor({ ...minimal, project })).toContainEqual(
-      'project.xcodeproj: set project.xcodeproj or project.xcworkspace',
-    );
-  });
-
   it('rejects a malformed team id', () => {
     for (const teamId of ['abcde12345', 'TOOSHORT', 'ABCDE123456']) {
       expect(errorsFor({ ...minimal, project: { ...minimal.project, teamId } })).toContainEqual(
@@ -93,29 +85,13 @@ describe('rejections', () => {
     }
   });
 
-  it('rejects a build configuration that is not in the available list', () => {
-    expect(
-      errorsFor({
-        ...minimal,
-        configurations: { available: ['Debug', 'Release'], wired: 'Profile' },
-      }),
-    ).toContainEqual(
-      'configurations.wired: "Profile" is not in configurations.available (Debug, Release)',
-    );
-  });
-
-  it('accepts a custom configuration once it is declared', () => {
-    const result = parseConfig({
-      ...minimal,
-      configurations: { available: ['Debug', 'Release', 'Profile'], wired: 'Profile' },
-    });
+  it('takes any configuration name — the project is what says which exist', () => {
+    // Nothing here can know the project's configurations, and a second list in
+    // the config would go stale. `xcodeproject.ts` checks the name at build time.
+    const result = parseConfig({ ...minimal, configurations: { wired: 'Profile' } });
     expect(result.ok).toBe(true);
-  });
-
-  it('requires a spec when xcodegen is on', () => {
-    expect(
-      errorsFor({ ...minimal, project: { ...minimal.project, xcodegen: true } }),
-    ).toContainEqual(expect.stringContaining('project.projectYml'));
+    if (!result.ok) return;
+    expect(result.config.configurations.wired).toBe('Profile');
   });
 
   it('refuses an absolute path', () => {
@@ -179,57 +155,21 @@ describe('variant targets', () => {
   const withTargets = (targets: unknown[]) =>
     parseConfig({ ...minimal, variant: { displayName: 'Acme Dev', targets } });
 
+  it('refuses two targets with the same name', () => {
+    expect(
+      errorsFor({
+        ...minimal,
+        variant: { displayName: 'A', targets: [{ name: 'App' }, { name: 'App' }] },
+      }),
+    ).toContainEqual(expect.stringContaining('share the name "App"'));
+  });
+
   it('accepts an app plus an extension', () => {
     const result = withTargets([
       { name: 'Acme', entitlements: 'ios/Acme.entitlements' },
       { name: 'Widget', bundleIdSuffix: 'uploadwidget' },
     ]);
     expect(result.ok).toBe(true);
-  });
-
-  it('requires exactly one target to be the app itself', () => {
-    expect(
-      errorsFor({
-        ...minimal,
-        variant: { displayName: 'A', targets: [{ name: 'X', bundleIdSuffix: 'x' }] },
-      }),
-    ).toContainEqual(expect.stringContaining('one target must be the app itself'));
-  });
-
-  it('refuses two targets that both claim the app bundle id', () => {
-    expect(
-      errorsFor({
-        ...minimal,
-        variant: { displayName: 'A', targets: [{ name: 'One' }, { name: 'Two' }] },
-      }),
-    ).toContainEqual(expect.stringContaining('only one target can be the app itself'));
-  });
-
-  it('refuses two extensions with the same bundle-id segment', () => {
-    expect(
-      errorsFor({
-        ...minimal,
-        variant: {
-          displayName: 'A',
-          targets: [
-            { name: 'App' },
-            { name: 'One', bundleIdSuffix: 'widget' },
-            { name: 'Two', bundleIdSuffix: 'widget' },
-          ],
-        },
-      }),
-    ).toContainEqual(expect.stringContaining('share the bundleIdSuffix "widget"'));
-  });
-
-  it('refuses a bundle-id segment that is not one segment', () => {
-    for (const bundleIdSuffix of ['Widget', 'up.load', 'up-load']) {
-      expect(
-        errorsFor({
-          ...minimal,
-          variant: { displayName: 'A', targets: [{ name: 'App' }, { name: 'X', bundleIdSuffix }] },
-        }),
-      ).toContainEqual(expect.stringContaining('one bundle-id segment'));
-    }
   });
 });
 

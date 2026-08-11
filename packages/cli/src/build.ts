@@ -8,8 +8,10 @@
 import { join } from 'node:path';
 import { localCredentials } from './asc.js';
 import type { Boundary, CommandResult } from './boundary.js';
+import { resolveTargets } from './bundle-ids.js';
 import type { Config } from './config.js';
 import { fail, type Project } from './project.js';
+import { projectSpecName } from './project-layout.js';
 import { signSettings, variantSettings, type SigningProfiles } from './signing.js';
 
 export interface BuildRequest {
@@ -76,7 +78,7 @@ export function buildArgs(boundary: Boundary, project: Project, request: BuildRe
     ...(request.withDsym ? [] : ['DEBUG_INFORMATION_FORMAT=dwarf']),
     ...(request.gitSha ? [`JETBRIDGE_GIT_SHA=${request.gitSha}`] : []),
     ...variantSettings(request.suffix, request.displayName),
-    ...signSettings(request.suffix, request.profiles, config),
+    ...signSettings(request.suffix, request.profiles, resolveTargets(boundary, project)),
     '-allowProvisioningUpdates',
     ...authArgs(boundary, config),
     ...(request.verbose ? [] : ['-quiet']),
@@ -112,9 +114,9 @@ export async function requireToolchain(
   if (!boundary.fs.exists(target)) {
     fail(
       `missing ${target}.\n` +
-        (project.config.project.projectYml
+        (projectSpecName(boundary, project.iosPath())
           ? '  Generate the project first, then re-run.'
-          : '  Check project.xcodeproj in the config.'),
+          : '  Check project.iosDir and project.xcodeproj in the config.'),
     );
   }
 }
@@ -122,6 +124,13 @@ export async function requireToolchain(
 /** Regenerate the project from its spec, when the config says it is generated. */
 export async function generateProject(boundary: Boundary, project: Project): Promise<void> {
   if (!project.config.project.xcodegen) return;
+  const directory = project.iosPath();
+  if (!projectSpecName(boundary, directory)) {
+    fail(
+      `project.xcodegen is on, but ${directory} holds no project.yml or project.yaml to ` +
+        'generate from.',
+    );
+  }
   await boundary.report.run('xcodegen', 'generated project', async () => {
     const result = await boundary.exec.run('xcodegen', ['generate'], {
       cwd: project.iosPath(),

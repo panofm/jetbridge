@@ -58,6 +58,65 @@ describe('loadProject', () => {
     expect(project.config.project.scheme).toBe('Acme');
   });
 
+  /** The config no longer names the project when the directory settles it. */
+  const inferredConfig = JSON.stringify({
+    configVersion: CONFIG_VERSION,
+    project: {
+      iosDir: 'ios',
+      scheme: 'Acme',
+      teamId: 'ABCDE12345',
+      baseBundleId: 'io.acme.app.dev',
+    },
+    variant: { displayName: 'Acme Dev' },
+  });
+
+  it('infers the one .xcodeproj in the directory, so the config need not name it', () => {
+    const project = loadProject(
+      boundaryWith({
+        '/w/jetbridge.config.json': inferredConfig,
+        '/w/ios/Acme.xcodeproj/project.pbxproj': '// !$*UTF8*$!\n{}\n',
+      }),
+    );
+    expect(project.config.project.xcodeproj).toBe('Acme.xcodeproj');
+    expect(project.xcodebuildTarget()).toEqual(['-project', '/w/ios/Acme.xcodeproj']);
+  });
+
+  it('says which .xcodeproj to name when the directory holds several', () => {
+    expect(() =>
+      loadProject(
+        boundaryWith({
+          '/w/jetbridge.config.json': inferredConfig,
+          '/w/ios/Acme.xcodeproj/project.pbxproj': 'x',
+          '/w/ios/Legacy.xcodeproj/project.pbxproj': 'x',
+        }),
+      ),
+    ).toThrow(/more than one \.xcodeproj[\s\S]*Acme\.xcodeproj[\s\S]*Legacy\.xcodeproj/);
+  });
+
+  /**
+   * A generated project is not on disk until XcodeGen has run. Loading has to
+   * succeed anyway — `bundles ls` never builds anything — and the complaint
+   * belongs to the command that actually needs the file.
+   */
+  it('loads a generated project that has not been generated yet', () => {
+    const project = loadProject(
+      boundaryWith({
+        '/w/jetbridge.config.json': inferredConfig,
+        '/w/ios/project.yml': 'name: Acme\n',
+      }),
+    );
+    expect(project.config.project.xcodeproj).toBeUndefined();
+    expect(() => project.xcodebuildTarget()).toThrow(
+      /no \.xcodeproj in \/w\/ios yet[\s\S]*Generate the project first/,
+    );
+  });
+
+  it('has nothing to infer from and says where it looked', () => {
+    expect(() => loadProject(boundaryWith({ '/w/jetbridge.config.json': inferredConfig }))).toThrow(
+      /no \.xcodeproj was found in \/w\/ios/,
+    );
+  });
+
   it('names the file when the JSON is malformed', () => {
     expect(() => loadProject(boundaryWith({ '/w/jetbridge.config.json': '{ nope' }))).toThrow(
       /jetbridge\.config\.json is not valid JSON/,

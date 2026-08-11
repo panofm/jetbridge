@@ -55,9 +55,12 @@ const boundaryWith = (files: Record<string, string>) => fakeBoundary({ files });
 describe('capabilitiesFor', () => {
   it('maps a realistic entitlements file to capability types', () => {
     const boundary = boundaryWith({ '/w/ios/Acme.entitlements': SHIPPING_ENTITLEMENTS });
-    expect(
-      capabilitiesFor(boundary, project, { name: 'Acme', entitlements: 'ios/Acme.entitlements' }),
-    ).toEqual(['PUSH_NOTIFICATIONS', 'ASSOCIATED_DOMAINS', 'APP_GROUPS', 'APPLE_ID_AUTH']);
+    expect(capabilitiesFor(boundary, project, { name: 'Acme' }, 'ios/Acme.entitlements')).toEqual([
+      'PUSH_NOTIFICATIONS',
+      'ASSOCIATED_DOMAINS',
+      'APP_GROUPS',
+      'APPLE_ID_AUTH',
+    ]);
   });
 
   it('prefers the variant file, which is the whole point', () => {
@@ -68,11 +71,12 @@ describe('capabilitiesFor', () => {
     // App groups and Sign in with Apple are dropped by the variant file, and
     // asking Apple for either through the public API fails the run.
     expect(
-      capabilitiesFor(boundary, project, {
-        name: 'Acme',
-        entitlements: 'ios/Acme.entitlements',
-        variantEntitlements: 'ios/Acme.variant.entitlements',
-      }),
+      capabilitiesFor(
+        boundary,
+        project,
+        { name: 'Acme', variantEntitlements: 'ios/Acme.variant.entitlements' },
+        'ios/Acme.entitlements',
+      ),
     ).toEqual(['PUSH_NOTIFICATIONS', 'ASSOCIATED_DOMAINS']);
   });
 
@@ -85,9 +89,9 @@ describe('capabilitiesFor', () => {
 	<string>production</string>
 </dict></plist>`,
     });
-    expect(
-      capabilitiesFor(boundary, project, { name: 'Acme', entitlements: 'ios/Acme.entitlements' }),
-    ).toEqual(['PUSH_NOTIFICATIONS']);
+    expect(capabilitiesFor(boundary, project, { name: 'Acme' }, 'ios/Acme.entitlements')).toEqual([
+      'PUSH_NOTIFICATIONS',
+    ]);
   });
 
   it('yields nothing when the target declares no entitlements file', () => {
@@ -96,10 +100,7 @@ describe('capabilitiesFor', () => {
 
   it('yields nothing when the declared file is not on disk', () => {
     expect(
-      capabilitiesFor(boundaryWith({}), project, {
-        name: 'Acme',
-        entitlements: 'ios/Gone.entitlements',
-      }),
+      capabilitiesFor(boundaryWith({}), project, { name: 'Acme' }, 'ios/Gone.entitlements'),
     ).toEqual([]);
   });
 
@@ -110,9 +111,9 @@ describe('capabilitiesFor', () => {
 	<string>ABCDE12345</string>
 </dict></plist>`,
     });
-    expect(
-      capabilitiesFor(boundary, project, { name: 'Acme', entitlements: 'ios/Acme.entitlements' }),
-    ).toEqual([]);
+    expect(capabilitiesFor(boundary, project, { name: 'Acme' }, 'ios/Acme.entitlements')).toEqual(
+      [],
+    );
   });
 
   /**
@@ -123,23 +124,21 @@ describe('capabilitiesFor', () => {
   it('fails loudly on a malformed entitlements file', () => {
     const boundary = boundaryWith({ '/w/ios/Acme.entitlements': 'not a plist at all' });
     expect(() =>
-      capabilitiesFor(boundary, project, { name: 'Acme', entitlements: 'ios/Acme.entitlements' }),
+      capabilitiesFor(boundary, project, { name: 'Acme' }, 'ios/Acme.entitlements'),
     ).toThrow(JetbridgeError);
   });
 });
 
 describe('entitlementsPathFor', () => {
   it('is the variant file when there is one', () => {
-    expect(entitlementsPathFor({ name: 'Acme', entitlements: 'a', variantEntitlements: 'b' })).toBe(
-      'b',
-    );
+    expect(entitlementsPathFor({ name: 'Acme', variantEntitlements: 'b' }, 'a')).toBe('b');
   });
 
-  it('falls back to the shipping file', () => {
-    expect(entitlementsPathFor({ name: 'Acme', entitlements: 'a' })).toBe('a');
+  it('falls back to the shipping file the project declares', () => {
+    expect(entitlementsPathFor({ name: 'Acme' }, 'a')).toBe('a');
   });
 
-  it('is undefined when the target declares neither', () => {
+  it('is undefined when there is neither', () => {
     expect(entitlementsPathFor({ name: 'Acme' })).toBeUndefined();
   });
 });

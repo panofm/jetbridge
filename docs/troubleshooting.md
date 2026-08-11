@@ -138,12 +138,11 @@ a variant slug is just the last segment — "io.acme.app.dev.<slug>" is built fo
 
 **What is wrong** — almost always: the build signed against the **full** entitlements file rather than the reduced variant one. App groups and Sign in with Apple cannot be granted through the public App Store Connect API, so the profile jetbridge mints does not carry them, and an entitlements file that asks for them cannot be signed against it.
 
-**The fix** — declare the reduced file, so the swap can happen. Both keys are required; a target with only `entitlements` is never swapped:
+**The fix** — declare the reduced file, so the swap can happen. The shipping file is read from the target's own `CODE_SIGN_ENTITLEMENTS`, so this is the only key to add:
 
 ```jsonc
 {
   "name": "Acme",
-  "entitlements": "ios/Acme/Acme.entitlements",
   "variantEntitlements": "ios/Acme/Acme.variant.entitlements",
 }
 ```
@@ -154,8 +153,8 @@ If the swap is declared but the path is spelled differently from the way the pro
 
 ```
 the entitlement swap matched no CODE_SIGN_ENTITLEMENTS in the project file.
-  Check that variant.targets[].entitlements matches the path the project spells,
-  and regenerate the project if it is stale.
+  Nothing in ios/Acme.xcodeproj/project.pbxproj assigns one of: Acme/Acme.entitlements
+  Regenerate the project if it is stale.
 ```
 
 Copy the path out of `project.pbxproj` exactly. If the project is generated from a spec, regenerate it first — a stale project file spells the old path.

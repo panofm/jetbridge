@@ -1,12 +1,22 @@
 /**
- * The entitlement swap edits a tracked file in place and puts it back. Two
- * things are load-bearing and both are asserted literally here: the exact
+ * The entitlement swap edits a tracked file in place and puts it back. Three
+ * things are load-bearing and all are asserted literally here: the exact
  * spelling of the patched line (byte-identity is what keeps the build
- * incremental), and that the original bytes always come back.
+ * incremental), that the original bytes always come back, and that BOTH sides
+ * of the swap are spelled relative to the Xcode project directory.
+ *
+ * That last one is why the `from` side is read out of the project rather than
+ * declared in the config. Two bases are in play — `CODE_SIGN_ENTITLEMENTS` is
+ * relative to the Xcode project directory, a config path to the project root —
+ * and a config written the way the schema documents produced a `from` that
+ * matched nothing. It failed loudly, but blamed a stale project rather than the
+ * spelling, so the fixtures here use the project's spelling throughout: one
+ * written the convenient way passes while the real thing does not.
  */
 import { describe, expect, it } from 'vitest';
 import {
   applySwap,
+  assertVariantEntitlements,
   codeSignLine,
   findStrandedSwap,
   pbxprojPath,
@@ -16,22 +26,23 @@ import {
 import { projectFrom, type Project } from '../src/project.js';
 import { testConfig } from './helpers/config.js';
 import { fakeBoundary, type FakeBoundary } from './helpers/fake-boundary.js';
+import { PBXPROJ_PATH as PATH_IN_REPO, pbxprojWith } from './helpers/pbxproj.js';
 
-const APP_SHIPPING = 'ios/Acme/Acme.entitlements';
-const APP_VARIANT = 'ios/Acme/Acme-variant.entitlements';
-const WIDGET_SHIPPING = 'ios/Widget/Widget.entitlements';
-const WIDGET_VARIANT = 'ios/Widget/Widget-variant.entitlements';
+/** As the PROJECT spells them — relative to the Xcode project directory. */
+const APP_SHIPPING = 'Acme/Acme.entitlements';
+const APP_VARIANT = 'Acme/Acme-variant.entitlements';
+const WIDGET_SHIPPING = 'Upload Widget/UploadWidget.entitlements';
+const WIDGET_VARIANT = 'Widget/Widget-variant.entitlements';
+
+/** The same two variant files as the CONFIG spells them — relative to the root. */
+const APP_VARIANT_CONFIG = 'ios/Acme/Acme-variant.entitlements';
+const WIDGET_VARIANT_CONFIG = 'ios/Widget/Widget-variant.entitlements';
 
 const swappableConfig = {
   variant: {
     targets: [
-      { name: 'Acme', entitlements: APP_SHIPPING, variantEntitlements: APP_VARIANT },
-      {
-        name: 'Upload Widget',
-        bundleIdSuffix: 'uploadwidget',
-        entitlements: WIDGET_SHIPPING,
-        variantEntitlements: WIDGET_VARIANT,
-      },
+      { name: 'Acme', variantEntitlements: APP_VARIANT_CONFIG },
+      { name: 'Upload Widget', variantEntitlements: WIDGET_VARIANT_CONFIG },
     ],
   },
 };
@@ -39,44 +50,32 @@ const swappableConfig = {
 const projectOf = (overrides: Record<string, unknown> = {}): Project =>
   projectFrom('/w/jetbridge.config.json', testConfig(overrides));
 
-const PBXPROJ_PATH = '/w/ios/Acme.xcodeproj/project.pbxproj';
+const PBXPROJ_PATH = `/w/${PATH_IN_REPO}`;
 
 /**
- * A project file shaped like a real one: the two assignments the swap rewrites,
- * plus a file reference that merely names the variant file — which exists on
- * disk in a clean checkout and must never read as a stranded swap.
+ * A project file with the given entitlements per target. It carries a file
+ * reference naming the variant file too — that exists on disk in a clean
+ * checkout, and must never read as a stranded swap.
  */
-const pbxproj = (assignments: string[]): string =>
-  [
-    '// !$*UTF8*$!',
-    '{',
-    '\tobjects = {',
-    '\t\tAA01 = {isa = PBXFileReference; path = "Acme-variant.entitlements"; ' +
-      'sourceTree = "<group>"; };',
-    '\t\tBB01 = {isa = XCBuildConfiguration; buildSettings = {',
-    ...assignments.map((line) => `\t\t\t${line}`),
-    '\t\t}; };',
-    '\t};',
-    '}',
-    '',
-  ].join('\n');
+const pbxproj = (app?: string, widget?: string): string =>
+  pbxprojWith({ Acme: app, 'Upload Widget': widget });
 
-const CLEAN = pbxproj([codeSignLine(APP_SHIPPING), codeSignLine(WIDGET_SHIPPING)]);
-const SWAPPED = pbxproj([codeSignLine(APP_VARIANT), codeSignLine(WIDGET_VARIANT)]);
+const CLEAN = pbxproj(APP_SHIPPING, WIDGET_SHIPPING);
+const SWAPPED = pbxproj(APP_VARIANT, WIDGET_VARIANT);
 
 const boundaryWithProject = (contents = CLEAN): FakeBoundary =>
   fakeBoundary({ files: { [PBXPROJ_PATH]: contents } });
 
 describe('codeSignLine', () => {
   it('leaves a plain path bare', () => {
-    expect(codeSignLine(APP_SHIPPING)).toBe('CODE_SIGN_ENTITLEMENTS = ios/Acme/Acme.entitlements;');
+    expect(codeSignLine(APP_SHIPPING)).toBe('CODE_SIGN_ENTITLEMENTS = Acme/Acme.entitlements;');
   });
 
   it('quotes a path containing a hyphen, exactly as a generator spells it', () => {
     // Byte-identity with a regenerated project file is what keeps xcodebuild
     // from fingerprinting a change and rebuilding the world.
     expect(codeSignLine(APP_VARIANT)).toBe(
-      'CODE_SIGN_ENTITLEMENTS = "ios/Acme/Acme-variant.entitlements";',
+      'CODE_SIGN_ENTITLEMENTS = "Acme/Acme-variant.entitlements";',
     );
   });
 
@@ -91,30 +90,82 @@ describe('codeSignLine', () => {
 
 describe('swappableTargets', () => {
   it('returns one pair per target declaring both files', () => {
-    expect(swappableTargets(projectOf(swappableConfig))).toEqual([
-      { from: APP_SHIPPING, to: APP_VARIANT },
-      { from: WIDGET_SHIPPING, to: WIDGET_VARIANT },
+    expect(swappableTargets(boundaryWithProject(), projectOf(swappableConfig), 'Debug')).toEqual([
+      { target: 'Acme', from: APP_SHIPPING, to: APP_VARIANT },
+      { target: 'Upload Widget', from: WIDGET_SHIPPING, to: WIDGET_VARIANT },
     ]);
   });
 
-  it('skips a target declaring only one of the two', () => {
-    const project = projectOf({
-      variant: {
-        targets: [
-          { name: 'Acme', entitlements: APP_SHIPPING },
-          {
-            name: 'Upload Widget',
-            bundleIdSuffix: 'uploadwidget',
-            variantEntitlements: WIDGET_VARIANT,
-          },
-        ],
-      },
-    });
-    expect(swappableTargets(project)).toEqual([]);
+  it('skips a target the config gives no variant file for', () => {
+    const project = projectOf({ variant: { targets: [{ name: 'Acme' }] } });
+    expect(swappableTargets(boundaryWithProject(), project, 'Debug')).toEqual([]);
+  });
+
+  it('skips a target the PROJECT declares no entitlements for', () => {
+    // Nothing to swap FROM. Before this was derived, the config claimed a path
+    // the project never spelled and the swap failed mid-build instead.
+    const boundary = boundaryWithProject(pbxproj(undefined, WIDGET_SHIPPING));
+    expect(swappableTargets(boundary, projectOf(swappableConfig), 'Debug')).toEqual([
+      { target: 'Upload Widget', from: WIDGET_SHIPPING, to: WIDGET_VARIANT },
+    ]);
+  });
+
+  it('reads the configuration the build will use', () => {
+    // Debug and Release may name different files; the swap has to match the
+    // line that build actually compiles against.
+    const boundary = boundaryWithProject();
+    expect(swappableTargets(boundary, projectOf(swappableConfig), 'Release')).toEqual([
+      { target: 'Acme', from: APP_SHIPPING, to: APP_VARIANT },
+      { target: 'Upload Widget', from: WIDGET_SHIPPING, to: WIDGET_VARIANT },
+    ]);
   });
 
   it('is empty for a project with no targets at all', () => {
-    expect(swappableTargets(projectOf())).toEqual([]);
+    expect(swappableTargets(boundaryWithProject(), projectOf(), 'Debug')).toEqual([]);
+  });
+});
+
+describe('assertVariantEntitlements', () => {
+  const onDisk = (...paths: string[]): FakeBoundary =>
+    fakeBoundary({ files: Object.fromEntries(paths.map((path) => [path, '<plist/>'])) });
+
+  it('passes when every declared file is where the config says', () => {
+    const boundary = onDisk(`/w/${APP_VARIANT_CONFIG}`, `/w/${WIDGET_VARIANT_CONFIG}`);
+    expect(() => assertVariantEntitlements(boundary, projectOf(swappableConfig))).not.toThrow();
+  });
+
+  it('quotes the ABSOLUTE path it looked at, which is what makes the mistake obvious', () => {
+    // The mistake this exists for: spelling the path the way the pbxproj does
+    // (`Acme/Acme-variant.entitlements`) when it is relative to the config.
+    const project = projectOf({
+      variant: {
+        targets: [{ name: 'Acme', variantEntitlements: 'Acme/Acme-variant.entitlements' }],
+      },
+    });
+    expect(() => assertVariantEntitlements(onDisk(`/w/${APP_VARIANT_CONFIG}`), project)).toThrow(
+      /but there is no file there:\n {2}\/w\/Acme\/Acme-variant\.entitlements/,
+    );
+  });
+
+  it('says what the path is relative to, and shows the shape that works', () => {
+    const project = projectOf({
+      variant: {
+        targets: [{ name: 'Acme', variantEntitlements: 'Acme/Acme-variant.entitlements' }],
+      },
+    });
+    expect(() => assertVariantEntitlements(fakeBoundary(), project)).toThrow(
+      /relative to this config file, not to the Xcode project directory[\s\S]*ios\/Acme\/Acme-variant\.entitlements/,
+    );
+  });
+
+  it('names every target that is wrong, not just the first', () => {
+    expect(() => assertVariantEntitlements(fakeBoundary(), projectOf(swappableConfig))).toThrow(
+      /declared for Acme, Upload Widget/,
+    );
+  });
+
+  it('has nothing to say when no target asks for a swap', () => {
+    expect(() => assertVariantEntitlements(fakeBoundary(), projectOf())).not.toThrow();
   });
 });
 
@@ -127,35 +178,55 @@ describe('pbxprojPath', () => {
 describe('applySwap', () => {
   it('rewrites every declared pair', () => {
     const boundary = boundaryWithProject();
-    applySwap(boundary, projectOf(swappableConfig));
+    applySwap(boundary, projectOf(swappableConfig), 'Debug');
     expect(boundary.fs.read(PBXPROJ_PATH)).toBe(SWAPPED);
+  });
+
+  it('writes the project-relative path, not the root-relative one', () => {
+    // The bug this replaced: the config said `ios/Acme/…` and the project said
+    // `Acme/…`, so `replaceAll` matched nothing and the swap failed mid-build.
+    const boundary = boundaryWithProject();
+    applySwap(boundary, projectOf(swappableConfig), 'Debug');
+    const after = boundary.fs.read(PBXPROJ_PATH);
+    expect(after).toContain('CODE_SIGN_ENTITLEMENTS = "Acme/Acme-variant.entitlements";');
+    expect(after).not.toContain('ios/Acme');
   });
 
   it('leaves everything else in the file untouched', () => {
     const boundary = boundaryWithProject();
-    applySwap(boundary, projectOf(swappableConfig));
+    applySwap(boundary, projectOf(swappableConfig), 'Debug');
     const after = boundary.fs.read(PBXPROJ_PATH);
     expect(after).toContain('isa = PBXFileReference');
     expect(after).not.toContain(codeSignLine(APP_SHIPPING));
   });
 
   it('fails when the project spells no matching assignment', () => {
-    const boundary = boundaryWithProject(pbxproj(['CODE_SIGN_ENTITLEMENTS = other.entitlements;']));
-    expect(() => applySwap(boundary, projectOf(swappableConfig))).toThrow(
+    const boundary = boundaryWithProject(pbxproj('other.entitlements', 'other.entitlements'));
+    expect(() => applySwap(boundary, projectOf(swappableConfig), 'Debug')).toThrow(
       /matched no CODE_SIGN_ENTITLEMENTS in the project file/,
     );
   });
 
-  it('fails when only some of the declared pairs matched', () => {
-    const boundary = boundaryWithProject(pbxproj([codeSignLine(APP_SHIPPING)]));
-    expect(() => applySwap(boundary, projectOf(swappableConfig))).toThrow(
-      /variant\.targets\[\]\.entitlements matches the path the project spells/,
+  it('refuses to build when a target asks for a swap it cannot have', () => {
+    // The dangerous case: dropping it quietly would build with FULL entitlements
+    // and sign against a variant profile that does not carry them.
+    const boundary = boundaryWithProject(pbxprojWith({ Acme: APP_SHIPPING }));
+    expect(() => applySwap(boundary, projectOf(swappableConfig), 'Debug')).toThrow(
+      /Upload Widget declare variantEntitlements, but .* assigns them no CODE_SIGN_ENTITLEMENTS/,
+    );
+    expect(boundary.writes).toEqual([]);
+  });
+
+  it('names the assignments it looked for when nothing matched', () => {
+    const boundary = boundaryWithProject(pbxproj('other.entitlements', 'other.entitlements'));
+    expect(() => applySwap(boundary, projectOf(swappableConfig), 'Debug')).toThrow(
+      /Nothing in .* assigns one of: other\.entitlements, other\.entitlements/,
     );
   });
 
   it('does not write the file when the swap failed', () => {
-    const boundary = boundaryWithProject(pbxproj(['CODE_SIGN_ENTITLEMENTS = other.entitlements;']));
-    expect(() => applySwap(boundary, projectOf(swappableConfig))).toThrow();
+    const boundary = boundaryWithProject(pbxproj('other.entitlements', 'other.entitlements'));
+    expect(() => applySwap(boundary, projectOf(swappableConfig), 'Debug')).toThrow();
     expect(boundary.writes).toEqual([]);
   });
 });
@@ -163,14 +234,12 @@ describe('applySwap', () => {
 describe('findStrandedSwap', () => {
   it('detects a live variant assignment left by an interrupted run', () => {
     const boundary = boundaryWithProject(SWAPPED);
-    expect(findStrandedSwap(boundary, projectOf(swappableConfig))).toBe(PBXPROJ_PATH);
+    expect(findStrandedSwap(boundary, projectOf(swappableConfig), 'Debug')).toBe(PBXPROJ_PATH);
   });
 
   it('detects a partial strand — one target swapped, one not', () => {
-    const boundary = boundaryWithProject(
-      pbxproj([codeSignLine(APP_VARIANT), codeSignLine(WIDGET_SHIPPING)]),
-    );
-    expect(findStrandedSwap(boundary, projectOf(swappableConfig))).toBe(PBXPROJ_PATH);
+    const boundary = boundaryWithProject(pbxproj(APP_VARIANT, WIDGET_SHIPPING));
+    expect(findStrandedSwap(boundary, projectOf(swappableConfig), 'Debug')).toBe(PBXPROJ_PATH);
   });
 
   it('does not flag a clean project that merely references the variant file', () => {
@@ -178,16 +247,20 @@ describe('findStrandedSwap', () => {
     // names it in its file references. Only an assignment counts.
     expect(CLEAN).toContain('Acme-variant.entitlements');
     const boundary = boundaryWithProject(CLEAN);
-    expect(findStrandedSwap(boundary, projectOf(swappableConfig))).toBeNull();
+    expect(findStrandedSwap(boundary, projectOf(swappableConfig), 'Debug')).toBeNull();
   });
 
   it('returns null when there is no project file to read', () => {
-    expect(findStrandedSwap(fakeBoundary(), projectOf(swappableConfig))).toBeNull();
+    expect(findStrandedSwap(fakeBoundary(), projectOf(swappableConfig), 'Debug')).toBeNull();
   });
 });
 
 describe('withEntitlementSwap', () => {
-  const options = { suffix: 'wave', backupPath: '/scratch/project.pbxproj.orig' };
+  const options = {
+    suffix: 'wave',
+    backupPath: '/scratch/project.pbxproj.orig',
+    configuration: 'Debug',
+  };
 
   it('is a no-op without a variant slug', async () => {
     const boundary = boundaryWithProject();

@@ -8,10 +8,10 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { DevicectlDevice } from '../src/devices.js';
-import { codeSignLine } from '../src/entitlements.js';
 import { projectFrom, type Project } from '../src/project.js';
 import { derivedDataPath, scratchPath, wiredInstall } from '../src/wired.js';
 import { testConfig } from './helpers/config.js';
+import { PBXPROJ as PBXPROJ_FIXTURE, PBXPROJ_PATH, pbxprojWith } from './helpers/pbxproj.js';
 import {
   fakeBoundary,
   type FakeBoundary,
@@ -21,7 +21,7 @@ import {
 const HOME = '/home/dev';
 const DERIVED_DATA = `${HOME}/Library/Caches/jetbridge/default`;
 const APP_PATH = `${DERIVED_DATA}/Build/Products/Debug-iphoneos/Acme.app`;
-const PBXPROJ = '/w/ios/Acme.xcodeproj/project.pbxproj';
+const PBXPROJ = `/w/${PBXPROJ_PATH}`;
 
 const project: Project = projectFrom('/w/jetbridge.config.json', testConfig());
 
@@ -59,7 +59,7 @@ const installStub = (id: string, code = 0) => ({
 function boundaryFor(devices: DevicectlDevice[], over: FakeBoundaryOptions = {}): FakeBoundary {
   const boundary = fakeBoundary({
     homedir: HOME,
-    files: { [PBXPROJ]: '// project', ...over.files },
+    files: { [PBXPROJ]: PBXPROJ_FIXTURE, ...over.files },
     commands: over.commands ?? [
       { match: ['command', '-v'] },
       { match: ['xcrun', 'devicectl', 'list', 'devices'] },
@@ -83,14 +83,53 @@ describe('paths', () => {
 });
 
 describe('preflight', () => {
-  it('rejects an unknown configuration, naming the ones that exist', async () => {
+  it('rejects an unknown configuration, naming the ones the PROJECT has', async () => {
+    // Debug, Release and Staging come out of the pbxproj. Nothing in the config
+    // lists them, so a renamed configuration cannot go stale here.
     const boundary = boundaryFor([device('DEV-A', 'iPhone A')]);
     await expect(
       wiredInstall(boundary, project, { ...plain, configuration: 'Beta' }),
     ).rejects.toThrow(
-      /"Beta" is not one of this project's build configurations \(Debug, Release\)/,
+      /"Beta" is not one of this project's build configurations \(Debug, Release, Staging\)/,
     );
     expect(boundary.calls).toEqual([]);
+  });
+
+  it('accepts a configuration only the project knows about', async () => {
+    const boundary = boundaryFor([device('DEV-A', 'iPhone A')], {
+      commands: [
+        { match: ['command', '-v'] },
+        { match: ['xcrun', 'devicectl', 'list', 'devices'] },
+        { match: ['xcodebuild', 'build'] },
+        installStub('DEV-A'),
+      ],
+      files: { [`${DERIVED_DATA}/Build/Products/Staging-iphoneos/Acme.app`]: 'MACH-O' },
+    });
+    await expect(
+      wiredInstall(boundary, project, { ...plain, configuration: 'Staging' }),
+    ).resolves.toBeUndefined();
+    expect(boundary.findCall('xcodebuild', '-configuration', 'Staging')).toBeDefined();
+  });
+
+  it('lets xcodebuild judge when the project file cannot be read', async () => {
+    // A false rejection blocks a build that would have worked, so an
+    // unparseable project skips the check rather than failing it.
+    const boundary = boundaryFor([device('DEV-A', 'iPhone A')], {
+      commands: [
+        { match: ['command', '-v'] },
+        { match: ['xcrun', 'devicectl', 'list', 'devices'] },
+        { match: ['xcodebuild', 'build'] },
+        installStub('DEV-A'),
+      ],
+      files: {
+        [PBXPROJ]: 'not a property list at all',
+        [`${DERIVED_DATA}/Build/Products/Beta-iphoneos/Acme.app`]: 'MACH-O',
+      },
+    });
+    await expect(
+      wiredInstall(boundary, project, { ...plain, configuration: 'Beta' }),
+    ).resolves.toBeUndefined();
+    expect(boundary.findCall('xcodebuild', '-configuration', 'Beta')).toBeDefined();
   });
 
   it('accepts a configuration the project declares', async () => {
@@ -246,7 +285,7 @@ describe('install', () => {
   it('fails when the build reported success but produced no app', async () => {
     const boundary = fakeBoundary({
       homedir: HOME,
-      files: { [PBXPROJ]: '// project' },
+      files: { [PBXPROJ]: PBXPROJ_FIXTURE },
       commands: [
         { match: ['command', '-v'] },
         { match: ['xcrun', 'devicectl', 'list', 'devices'] },
@@ -315,15 +354,18 @@ describe('a successful run', () => {
     const boundary = boundaryFor([device('DEV-A', 'iPhone A')]);
     await wiredInstall(boundary, project, plain);
     expect(boundary.writes).not.toContain(PBXPROJ);
-    expect(boundary.fs.read(PBXPROJ)).toBe('// project');
+    expect(boundary.fs.read(PBXPROJ)).toBe(PBXPROJ_FIXTURE);
   });
 });
 
 describe('a variant run against cached profiles', () => {
-  const SHIPPING = 'ios/Acme/Acme.entitlements';
-  const VARIANT = 'ios/Acme/Acme-variant.entitlements';
-  const CLEAN_PBXPROJ = `buildSettings = { ${codeSignLine(SHIPPING)} };\n`;
-  const SWAPPED_PBXPROJ = `buildSettings = { ${codeSignLine(VARIANT)} };\n`;
+  /** As the PROJECT spells them, which is what the swap has to match. */
+  const SHIPPING = 'Acme/Acme.entitlements';
+  const VARIANT = 'Acme/Acme-variant.entitlements';
+  /** The variant file as the CONFIG spells it — relative to the root, not the project. */
+  const VARIANT_CONFIG = 'ios/Acme/Acme-variant.entitlements';
+  const CLEAN_PBXPROJ = pbxprojWith({ Acme: SHIPPING });
+  const SWAPPED_PBXPROJ = pbxprojWith({ Acme: VARIANT });
   const VARIANT_APP = `${HOME}/Library/Caches/jetbridge/wave/Build/Products/Debug-iphoneos/Acme.app`;
   const PROFILE_DIR = `${HOME}/Library/MobileDevice/Provisioning Profiles`;
   const DER = Buffer.from('der-local').toString('base64');
@@ -345,9 +387,7 @@ describe('a variant run against cached profiles', () => {
   const variantProject = projectFrom(
     '/w/jetbridge.config.json',
     testConfig({
-      variant: {
-        targets: [{ name: 'Acme', entitlements: SHIPPING, variantEntitlements: VARIANT }],
-      },
+      variant: { targets: [{ name: 'Acme', variantEntitlements: VARIANT_CONFIG }] },
     }),
   );
 
@@ -361,6 +401,9 @@ describe('a variant run against cached profiles', () => {
       },
       files: {
         [PBXPROJ]: CLEAN_PBXPROJ,
+        // The reduced file has to be on disk — a variant build checks before it
+        // registers anything at Apple.
+        [`/w/${VARIANT_CONFIG}`]: '<plist/>',
         '/keys/AuthKey_KEY1.p8': 'PEM',
         [`${PROFILE_DIR}/app.mobileprovision`]: 'CMS BYTES',
       },

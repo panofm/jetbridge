@@ -37,23 +37,23 @@ so it has to be given by hand.
 
 `init` parses `project.pbxproj` and suggests every value below. Each suggestion carries the file it came from, and each one is shown as an editable default. Nothing is accepted silently.
 
-| Config field                     | Read from                                                             |
-| -------------------------------- | --------------------------------------------------------------------- |
-| `project.iosDir`                 | where the `.xcodeproj` or `.xcworkspace` is, at the root or one below |
-| `project.xcodeproj`              | the directory listing                                                 |
-| `project.xcworkspace`            | the directory listing                                                 |
-| `project.scheme`                 | the shared schemes, matched against the app target name               |
-| `project.teamId`                 | `DEVELOPMENT_TEAM`, target first, then project                        |
-| `project.baseBundleId`           | `PRODUCT_BUNDLE_IDENTIFIER` on the app target                         |
-| `project.projectYml`             | a `project.yml` or `project.yaml` beside the project                  |
-| `configurations.available`       | the project's own build configuration list                            |
-| `variant.displayName`            | `INFOPLIST_KEY_CFBundleDisplayName`, or the target name               |
-| `variant.targets`                | the app target and every extension, with their bundle-id segments     |
-| `variant.targets[].entitlements` | `CODE_SIGN_ENTITLEMENTS` per target                                   |
+| Config field           | Read from                                                             |
+| ---------------------- | --------------------------------------------------------------------- |
+| `project.iosDir`       | where the `.xcodeproj` or `.xcworkspace` is, at the root or one below |
+| `project.xcworkspace`  | the directory listing                                                 |
+| `project.scheme`       | the shared schemes, matched against the app target name               |
+| `project.teamId`       | `DEVELOPMENT_TEAM`, target first, then project                        |
+| `project.baseBundleId` | `PRODUCT_BUNDLE_IDENTIFIER` on the app target                         |
+| `variant.displayName`  | `INFOPLIST_KEY_CFBundleDisplayName`, or the target name               |
+| `variant.targets`      | the app target and every extension, by name                           |
 
-Two details are worth knowing.
+These are never written to the config at all, because a copy of a project fact goes stale and a stale copy fails a build:
 
-`configurations.available` comes from the **project's** configuration list, not from the union of every target's. A name that only one target defines is not a name `xcodebuild -configuration` accepts. If the project-level list cannot be read, `init` falls back to the union and warns you.
+- **which `.xcodeproj` to build** — the directory listing answers it whenever it holds exactly one. `project.xcodeproj` is written only to settle which of several to build, and the error lists what was found so the answer can be copied out of it.
+- **whether there is an XcodeGen spec** — a `project.yml` or `project.yaml` beside the project is found when it is needed. `project.xcodegen` stays, because regenerating before every build is a choice; it fails clearly if it is on and no spec is there.
+- **each extension's bundle-id segment** — read from `PRODUCT_BUNDLE_IDENTIFIER` on each target. A target is named in `variant.targets`, and nothing else about it is restated.
+- **which build configurations exist** — read from the project's own configuration list every time, not the union of every target's. A name only one target defines is not a name `xcodebuild -configuration` accepts. `configurations.wired`, `sim` and `archive` are checked against that list when you build; if the project cannot be read, the check is skipped and `xcodebuild` decides, because refusing a build that would have worked is the worse mistake.
+- **each target's entitlements file** — read from `CODE_SIGN_ENTITLEMENTS` on the target. Only `variantEntitlements` stays in the config, because that file is genuinely new information the project does not carry.
 
 Values are read from the configuration a cabled build will use — `Debug` first. If `Debug` and `Release` carry different bundle ids, `init` uses the `Debug` one and tells you they differ. If your project has no `Debug` at all, `init` asks which configuration each mode should use, because naming one that does not exist fails deep inside `xcodebuild`.
 
@@ -122,7 +122,7 @@ These names are fixed. Your project consumes them as they are — there is nothi
 | `JETBRIDGE_PROFILE_APP`       | the generated profile name    | `PROVISIONING_PROFILE_SPECIFIER`      |
 | `JETBRIDGE_PROFILE_<SEGMENT>` | one per extension             | the same, on that extension's target  |
 
-The profile setting name is built from the target's `bundleIdSuffix`, uppercased: an extension with `"bundleIdSuffix": "uploadwidget"` gets `JETBRIDGE_PROFILE_UPLOADWIDGET`. The app itself, which has no suffix, gets `JETBRIDGE_PROFILE_APP`.
+The profile setting name is built from the extension's own bundle-id segment, uppercased: a target whose id is `io.acme.app.dev.uploadwidget` gets `JETBRIDGE_PROFILE_UPLOADWIDGET`. The app itself, which owns the base id, gets `JETBRIDGE_PROFILE_APP`.
 
 ### With xcconfig files
 
@@ -145,7 +145,7 @@ PROVISIONING_PROFILE_SPECIFIER = $(JETBRIDGE_PROFILE_APP)
 
 ### With a generated project
 
-If XcodeGen builds the project (`project.projectYml`), the same four lines go in the target's `settings` block of `project.yml`, with the jetbridge config key that supplies each value:
+If XcodeGen builds the project (`project.xcodegen`), the same four lines go in the target's `settings` block of `project.yml`, with the jetbridge config key that supplies each value:
 
 ```yaml
 settings:
@@ -179,7 +179,7 @@ If the project sets build settings in the Xcode UI, do the same four lines by ha
 4. **Code Signing Style** → `$(JETBRIDGE_SIGN_STYLE)`.
 5. **Provisioning Profile** → `$(JETBRIDGE_PROFILE_APP)`, and add a User-Defined `JETBRIDGE_PROFILE_APP` with an empty default.
 
-A command-line build setting applies to every target in the build, so the profile name has to stay behind its own setting per target: the app reads `$(JETBRIDGE_PROFILE_APP)` and an extension with `"bundleIdSuffix": "uploadwidget"` reads `$(JETBRIDGE_PROFILE_UPLOADWIDGET)`. Pointing both at `PROVISIONING_PROFILE_SPECIFIER` directly would give both targets the same profile.
+A command-line build setting applies to every target in the build, so the profile name has to stay behind its own setting per target: the app reads `$(JETBRIDGE_PROFILE_APP)` and an extension whose id ends in `.uploadwidget` reads `$(JETBRIDGE_PROFILE_UPLOADWIDGET)`. Pointing both at `PROVISIONING_PROFILE_SPECIFIER` directly would give both targets the same profile.
 
 ## 5. Reduced variant entitlements
 
@@ -208,52 +208,67 @@ The fix is a second file with those entitlements removed, used only for a varian
   "targets": [
     {
       "name": "Acme",
-      "entitlements": "ios/Acme/Acme.entitlements",
       "variantEntitlements": "ios/Acme/Acme.variant.entitlements",
     },
   ],
 }
 ```
 
-Both paths are relative to the project root and must stay inside it.
+Only the reduced file is declared. The shipping one is whatever `CODE_SIGN_ENTITLEMENTS` already says for that target, so there is no second copy to keep in step.
 
-There is no capability list to keep in step. jetbridge reads `variantEntitlements` — the shipping `entitlements` file when there is no variant one — and enables the matching App Store Connect capabilities on the registered bundle id. `aps-environment` becomes `PUSH_NOTIFICATIONS`, `com.apple.developer.associated-domains` becomes `ASSOCIATED_DOMAINS`, and so on. An entitlement it does not recognise is skipped, because Apple adds entitlements faster than any table can follow. A target with no entitlements file asks for no capabilities, which is right for an app that needs none.
+**Watch the base this path is relative to.** Like every path in the config, it is relative to the **project root** — the directory holding `jetbridge.config.json`. `CODE_SIGN_ENTITLEMENTS` inside the project is relative to the **Xcode project directory**, which is one level down. In practice the two files are siblings, so take the shipping path and put `iosDir` on the front:
+
+| `CODE_SIGN_ENTITLEMENTS` says | `variantEntitlements` wants          |
+| ----------------------------- | ------------------------------------ |
+| `Acme/Acme.entitlements`      | `ios/Acme/Acme.variant.entitlements` |
+
+A variant build checks the file is there before it registers anything with Apple, and quotes the absolute path it looked at if it is not.
+
+There is no capability list to keep in step either. jetbridge reads `variantEntitlements` — or the target's own entitlements file when there is no variant one — and enables the matching App Store Connect capabilities on the registered bundle id. `aps-environment` becomes `PUSH_NOTIFICATIONS`, `com.apple.developer.associated-domains` becomes `ASSOCIATED_DOMAINS`, and so on. An entitlement it does not recognise is skipped, because Apple adds entitlements faster than any table can follow. A target with no entitlements file asks for no capabilities, which is right for an app that needs none.
 
 This is also why the reduced file is the one it reads: asking the public API for a capability it cannot grant fails the run, and the reduced file is exactly the list of what it can.
 
 For a variant build, jetbridge rewrites the `CODE_SIGN_ENTITLEMENTS` line in `project.pbxproj` to the reduced file, and restores the original bytes the moment the build returns — before the install runs, and on `SIGINT`, `SIGTERM` or `SIGHUP` as well. Only that one line changes. A plain build swaps nothing.
 
-The path in the config must match the way the project spells it, character for character. If it does not, the swap fails loudly rather than building the wrong thing:
+Both sides of that rewrite are spelled the way the project spells them, so there is nothing to keep in step by hand. If the project assigns no entitlements to a target you gave a `variantEntitlements`, the swap says which assignment it looked for rather than building the wrong thing:
 
 ```
 the entitlement swap matched no CODE_SIGN_ENTITLEMENTS in the project file.
-  Check that variant.targets[].entitlements matches the path the project spells,
-  and regenerate the project if it is stale.
+  Nothing in ios/Acme.xcodeproj/project.pbxproj assigns one of: Acme/Acme.entitlements
+  Regenerate the project if it is stale.
 ```
 
 ## 6. Extensions
 
-An extension ships inside the app, so it needs its own bundle id, its own registration and its own profile. Give it its own entry with a `bundleIdSuffix`:
+An extension ships inside the app, so it needs its own bundle id, its own registration and its own profile. Name it, and nothing else:
 
 ```jsonc
-"targets": [
-  { "name": "Acme" },
-  { "name": "UploadWidget", "bundleIdSuffix": "uploadwidget" },
-]
+"targets": [{ "name": "Acme" }, { "name": "UploadWidget" }]
 ```
 
-The suffix is one bundle-id segment: lowercase letters and digits only.
+The segment comes from the project. jetbridge reads each target's `PRODUCT_BUNDLE_IDENTIFIER` and takes the part after the app's id, so a project like this:
 
-jetbridge builds the ids so the extension always nests under the app:
+```
+app        io.acme.app.dev
+extension  io.acme.app.dev.uploadwidget
+```
+
+gives the extension the segment `uploadwidget`, and a variant build registers:
 
 ```
 app        io.acme.app.dev.wave
 extension  io.acme.app.dev.wave.uploadwidget
 ```
 
-That nesting is what iOS requires of a container and its extension. Never give an extension a `bundleIdSuffix` that would put it somewhere else in the tree.
+The app is the target whose id every other target's id extends — nothing has to declare which one it is. A target whose id is not inside the app's is a misconfigured project rather than something to guess at, and the failure names both ids:
 
-Exactly one target leaves `bundleIdSuffix` unset — that is the app. Two would both claim the app's bundle id and overwrite each other's profile, so the config schema refuses it.
+```
+UploadWidget's bundle id is not inside the app's, so it is not an extension of it:
+  Acme: io.acme.app.dev
+  UploadWidget: io.other.widget
+```
+
+Naming a target in `variant.targets` is the one decision left, and it is a real one: a project's test targets and any extension that should not get variant treatment are left out.
 
 ## 7. First-run checklist
 

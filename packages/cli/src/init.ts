@@ -24,7 +24,8 @@ import {
   type Config,
 } from './config.js';
 import { detectProject, type Detection, type Suggestion } from './detect.js';
-import { fail, projectFrom, type Project } from './project.js';
+import { fail, projectAt, type Project } from './project.js';
+import { xcodeprojNames } from './project-layout.js';
 import type { Prompter } from './prompts.js';
 
 /** Editors autocomplete against the published schema, not against this file. */
@@ -38,8 +39,6 @@ const DEFAULT_CONFIGURATIONS = ['Debug', 'Release'];
 
 export interface TargetInput {
   name: string;
-  bundleIdSuffix?: string;
-  entitlements?: string;
 }
 
 export interface ConfigInput {
@@ -49,9 +48,8 @@ export interface ConfigInput {
   scheme: string;
   teamId: string;
   baseBundleId: string;
-  projectYml?: string;
   xcodegen?: boolean;
-  configurations: { available: string[]; wired: string; sim: string; archive: string };
+  configurations: { wired: string; sim: string; archive: string };
   displayName: string;
   targets: TargetInput[];
   credentials: { ascKeyId: string; ascIssuerId: string };
@@ -84,22 +82,16 @@ export function assembleConfig(input: ConfigInput): Record<string, unknown> {
       scheme: input.scheme,
       teamId: input.teamId,
       baseBundleId: input.baseBundleId,
-      ...(input.projectYml ? { projectYml: input.projectYml } : {}),
       ...(input.xcodegen ? { xcodegen: true } : {}),
     },
     configurations: {
-      available: input.configurations.available,
       wired: input.configurations.wired,
       sim: input.configurations.sim,
       archive: input.configurations.archive,
     },
     variant: {
       displayName: input.displayName,
-      targets: input.targets.map((target) => ({
-        name: target.name,
-        ...(target.bundleIdSuffix ? { bundleIdSuffix: target.bundleIdSuffix } : {}),
-        ...(target.entitlements ? { entitlements: target.entitlements } : {}),
-      })),
+      targets: input.targets.map((target) => ({ name: target.name })),
     },
     // The wizard asks for a plain name, because typing `${…}` at a prompt is
     // unpleasant. The FILE always carries the reference form, so a reader can
@@ -226,9 +218,10 @@ export function detectDrift(config: Config, detection: Detection): Drift[] {
     });
   }
 
+  // The list itself is no longer config — but the three names that ARE config
+  // still have to exist in the project, and this is where a rename shows up.
   const available = detection.configurations;
   if (available) {
-    add('configurations.available', config.configurations.available, available);
     for (const field of ['wired', 'sim', 'archive'] as const) {
       const current = config.configurations[field];
       if (available.value.includes(current)) continue;
@@ -438,9 +431,16 @@ async function create(
     given: options.iosDir,
     detected: detection.iosDir,
   });
-  const xcodeproj = options.xcodeproj ?? detection.xcodeproj?.value;
+  // Written only when the directory cannot settle it — one .xcodeproj is
+  // inferred at build time, and writing it down would be the duplication this
+  // config keeps out.
+  const found = xcodeprojNames(boundary, resolve(detection.root, iosDir));
   const xcworkspace = options.xcworkspace ?? detection.xcworkspace?.value;
-  if (!xcodeproj && !xcworkspace) {
+  const xcodeproj = options.xcodeproj;
+  if (found.length === 0 && !xcworkspace) {
+    missing.push({ field: 'project.xcodeproj', flag: '--xcodeproj' });
+  }
+  if (found.length > 1 && !options.xcodeproj) {
     missing.push({ field: 'project.xcodeproj', flag: '--xcodeproj' });
   }
 
@@ -648,14 +648,11 @@ async function create(
     scheme,
     teamId,
     baseBundleId,
-    ...(detection.projectYml ? { projectYml: detection.projectYml.value } : {}),
     xcodegen,
-    configurations: { available: configurations, wired, sim, archive },
+    configurations: { wired, sim, archive },
     displayName,
     targets: detection.targets.map((target) => ({
       name: target.name,
-      ...(target.bundleIdSuffix ? { bundleIdSuffix: target.bundleIdSuffix } : {}),
-      ...(target.entitlements ? { entitlements: target.entitlements.value } : {}),
     })),
     credentials: { ascKeyId, ascIssuerId },
     ...(ota ? { ota } : {}),
@@ -753,7 +750,7 @@ async function finish(
 
   const contents = serializeConfig(raw);
   deps.prompts.note(contents.trimEnd(), configPath);
-  for (const preview of commandPreviews(projectFrom(configPath, checked.config))) {
+  for (const preview of commandPreviews(projectAt(boundary, configPath, checked.config))) {
     boundary.log.info(`  ${preview.mode.padEnd(7)} ${preview.command}`);
   }
 

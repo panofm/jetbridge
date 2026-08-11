@@ -5,7 +5,9 @@
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import type { Config } from '../src/config.js';
+import type { ResolvedTarget } from '../src/bundle-ids.js';
+import { projectFrom } from '../src/project.js';
+import { PBXPROJ, PBXPROJ_PATH } from './helpers/pbxproj.js';
 import {
   cachedSigning,
   localSigningThumbprints,
@@ -50,13 +52,11 @@ const plist = (spec: PlistSpec): string =>
 
 const isoIn = (ms: number): string => new Date(NOW * 1000 + ms).toISOString();
 
-const variantConfig = (overrides: Record<string, unknown> = {}): Config =>
-  testConfig({
-    variant: {
-      targets: [{ name: 'Acme' }, { name: 'Upload Widget', bundleIdSuffix: 'uploadwidget' }],
-      ...overrides,
-    },
-  });
+/** The targets as the pbxproj resolves them: the app, plus one extension. */
+const resolvedTargets: ResolvedTarget[] = [
+  { name: 'Acme' },
+  { name: 'Upload Widget', bundleIdSuffix: 'uploadwidget' },
+];
 
 describe('profileSettingName', () => {
   it('is JETBRIDGE_PROFILE_APP for the app target', () => {
@@ -76,11 +76,11 @@ describe('signSettings', () => {
   };
 
   it('is empty without a variant, leaving the project on automatic signing', () => {
-    expect(signSettings('', profiles, variantConfig())).toEqual([]);
+    expect(signSettings('', profiles, resolvedTargets)).toEqual([]);
   });
 
   it('switches to manual signing and names one profile per configured target', () => {
-    expect(signSettings('wave', profiles, variantConfig())).toEqual([
+    expect(signSettings('wave', profiles, resolvedTargets)).toEqual([
       'JETBRIDGE_SIGN_STYLE=Manual',
       'JETBRIDGE_PROFILE_APP=Acme wave app',
       'JETBRIDGE_PROFILE_UPLOADWIDGET=Acme wave uploadwidget',
@@ -88,7 +88,7 @@ describe('signSettings', () => {
   });
 
   it('skips a target with no profile, but still switches to manual', () => {
-    expect(signSettings('wave', { byTarget: { Acme: 'Acme wave app' } }, variantConfig())).toEqual([
+    expect(signSettings('wave', { byTarget: { Acme: 'Acme wave app' } }, resolvedTargets)).toEqual([
       'JETBRIDGE_SIGN_STYLE=Manual',
       'JETBRIDGE_PROFILE_APP=Acme wave app',
     ]);
@@ -209,7 +209,16 @@ describe('cachedSigning', () => {
     });
 
   /** One app-only variant config, so a single cached profile is a full hit. */
-  const config = testConfig({ variant: { targets: [{ name: 'Acme' }] } });
+  const project = projectFrom(
+    '/w/jetbridge.config.json',
+    testConfig({ variant: { targets: [{ name: 'Acme' }] } }),
+  );
+  /** Two targets, so the extension's segment comes out of the project file. */
+  const variantProject = projectFrom(
+    '/w/jetbridge.config.json',
+    testConfig({ variant: { targets: [{ name: 'Acme' }, { name: 'Upload Widget' }] } }),
+  );
+  const emptyProject = projectFrom('/w/jetbridge.config.json', testConfig());
 
   const boundaryWith = (
     profiles: Record<string, string>,
@@ -217,9 +226,12 @@ describe('cachedSigning', () => {
   ): ReturnType<typeof fakeBoundary> =>
     fakeBoundary({
       homedir: '/home/dev',
-      files: Object.fromEntries(
-        Object.keys(profiles).map((file) => [`${PROFILE_DIR}/${file}`, 'CMS BYTES']),
-      ),
+      files: {
+        [`/w/${PBXPROJ_PATH}`]: PBXPROJ,
+        ...Object.fromEntries(
+          Object.keys(profiles).map((file) => [`${PROFILE_DIR}/${file}`, 'CMS BYTES']),
+        ),
+      },
       commands: [
         { match: ['security', 'find-identity'], stdout: `1) ${sha1Of(CERT)} "Apple Development"` },
         ...Object.entries(profiles).map(([file, xml]) => ({
@@ -232,14 +244,14 @@ describe('cachedSigning', () => {
 
   it('hits when a profile covers the name, expiry, devices and certificate', () => {
     const boundary = boundaryWith({ 'app.mobileprovision': goodPlist() });
-    expect(cachedSigning(boundary, config, options)).toEqual({
+    expect(cachedSigning(boundary, project, options)).toEqual({
       byTarget: { Acme: 'Acme wave app' },
     });
   });
 
   it('returns null when the profile directory does not exist', () => {
     const boundary = fakeBoundary({ homedir: '/home/dev' });
-    expect(cachedSigning(boundary, config, options)).toBeNull();
+    expect(cachedSigning(boundary, project, options)).toBeNull();
     // Nothing is even asked of the keychain.
     expect(boundary.calls).toEqual([]);
   });
@@ -249,49 +261,51 @@ describe('cachedSigning', () => {
       { 'app.mobileprovision': goodPlist() },
       { commands: [{ match: ['security', 'find-identity'], stdout: '0 valid identities found' }] },
     );
-    expect(cachedSigning(boundary, config, options)).toBeNull();
+    expect(cachedSigning(boundary, project, options)).toBeNull();
   });
 
   it('returns null when the config declares no targets', () => {
     const boundary = boundaryWith({ 'app.mobileprovision': goodPlist() });
-    expect(cachedSigning(boundary, testConfig(), options)).toBeNull();
+    expect(cachedSigning(boundary, emptyProject, options)).toBeNull();
   });
 
   it('returns null when no device was resolved', () => {
     const boundary = boundaryWith({ 'app.mobileprovision': goodPlist() });
-    expect(cachedSigning(boundary, config, { ...options, deviceUdids: [] })).toBeNull();
+    expect(cachedSigning(boundary, project, { ...options, deviceUdids: [] })).toBeNull();
   });
 
   it('returns null when a resolved device reported a blank UDID', () => {
     // A blank UDID cannot be checked against the profile's device list, so the
     // cache must not claim coverage it has not verified.
     const boundary = boundaryWith({ 'app.mobileprovision': goodPlist() });
-    expect(cachedSigning(boundary, config, { ...options, deviceUdids: ['UDID-A', ''] })).toBeNull();
+    expect(
+      cachedSigning(boundary, project, { ...options, deviceUdids: ['UDID-A', ''] }),
+    ).toBeNull();
   });
 
   it('misses when the profile expires within a day', () => {
     const boundary = boundaryWith({
       'app.mobileprovision': goodPlist({ expires: isoIn(23 * HOUR_MS) }),
     });
-    expect(cachedSigning(boundary, config, options)).toBeNull();
+    expect(cachedSigning(boundary, project, options)).toBeNull();
   });
 
   it('hits when the profile expires just outside the margin', () => {
     const boundary = boundaryWith({
       'app.mobileprovision': goodPlist({ expires: isoIn(25 * HOUR_MS) }),
     });
-    expect(cachedSigning(boundary, config, options)).not.toBeNull();
+    expect(cachedSigning(boundary, project, options)).not.toBeNull();
   });
 
   it('misses when the expiry date is unparseable', () => {
     const boundary = boundaryWith({ 'app.mobileprovision': goodPlist({ expires: 'never' }) });
-    expect(cachedSigning(boundary, config, options)).toBeNull();
+    expect(cachedSigning(boundary, project, options)).toBeNull();
   });
 
   it('misses when the profile does not cover every targeted device', () => {
     const boundary = boundaryWith({ 'app.mobileprovision': goodPlist({ devices: ['UDID-A'] }) });
     expect(
-      cachedSigning(boundary, config, { ...options, deviceUdids: ['UDID-A', 'UDID-NEW'] }),
+      cachedSigning(boundary, project, { ...options, deviceUdids: ['UDID-A', 'UDID-NEW'] }),
     ).toBeNull();
   });
 
@@ -301,17 +315,17 @@ describe('cachedSigning', () => {
     const boundary = boundaryWith({
       'app.mobileprovision': goodPlist({ certificates: [derBase64('someone-else')] }),
     });
-    expect(cachedSigning(boundary, config, options)).toBeNull();
+    expect(cachedSigning(boundary, project, options)).toBeNull();
   });
 
   it('misses when the profile name is not what the provisioner mints', () => {
     const boundary = boundaryWith({ 'app.mobileprovision': goodPlist({ name: 'Some Other App' }) });
-    expect(cachedSigning(boundary, config, options)).toBeNull();
+    expect(cachedSigning(boundary, project, options)).toBeNull();
   });
 
   it('needs a profile for EVERY target, not just the app', () => {
     const boundary = boundaryWith({ 'app.mobileprovision': goodPlist() });
-    expect(cachedSigning(boundary, variantConfig(), options)).toBeNull();
+    expect(cachedSigning(boundary, variantProject, options)).toBeNull();
   });
 
   it('hits when every target has its own profile', () => {
@@ -319,7 +333,7 @@ describe('cachedSigning', () => {
       'app.mobileprovision': goodPlist(),
       'widget.mobileprovision': goodPlist({ name: 'Acme wave uploadwidget' }),
     });
-    expect(cachedSigning(boundary, variantConfig(), options)).toEqual({
+    expect(cachedSigning(boundary, variantProject, options)).toEqual({
       byTarget: { Acme: 'Acme wave app', 'Upload Widget': 'Acme wave uploadwidget' },
     });
   });
@@ -343,7 +357,7 @@ describe('cachedSigning', () => {
         ],
       },
     );
-    expect(cachedSigning(boundary, config, options)).not.toBeNull();
+    expect(cachedSigning(boundary, project, options)).not.toBeNull();
     expect(boundary.commandLines().some((line) => line.includes('README.txt'))).toBe(false);
     // Sorted first, so the undecodable profile really is reached and skipped
     // before the good one satisfies the cache and ends the loop.
@@ -355,6 +369,6 @@ describe('cachedSigning', () => {
     boundary.exec.runSync = () => {
       throw new Error('security is not installed');
     };
-    expect(cachedSigning(boundary, config, options)).toBeNull();
+    expect(cachedSigning(boundary, project, options)).toBeNull();
   });
 });

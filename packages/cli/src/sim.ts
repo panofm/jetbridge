@@ -30,6 +30,7 @@ import {
 } from './simulator.js';
 import { bundleIdFor } from './variant.js';
 import { derivedDataPath } from './wired.js';
+import { assertConfiguration } from './xcodeproject.js';
 
 export interface SimOptions {
   /** Stream the full xcodebuild log instead of the quiet one. */
@@ -52,12 +53,7 @@ export async function simInstall(
 ): Promise<void> {
   const { config } = project;
   const configuration = options.configuration ?? config.configurations.sim;
-  if (!config.configurations.available.includes(configuration)) {
-    fail(
-      `"${configuration}" is not one of this project's build configurations ` +
-        `(${config.configurations.available.join(', ')})`,
-    );
-  }
+  assertConfiguration(boundary, project, configuration);
 
   const report = boundary.report;
   await requireToolchain(boundary, project, ['xcodebuild', 'xcrun']);

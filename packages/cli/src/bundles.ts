@@ -18,6 +18,7 @@
  */
 import { asArray, connect, type AscClient, type AscDocument } from './asc.js';
 import type { Boundary } from './boundary.js';
+import { resolveTargets, type ResolvedTarget } from './bundle-ids.js';
 import { labelPrefixFor, type Config } from './config.js';
 import { fail, type Project } from './project.js';
 import { provisionVariant, type ProvisionedProfile } from './provision.js';
@@ -50,20 +51,24 @@ export interface RegisteredVariant {
  * the plain build. Both are single-segment children of the base — structurally
  * indistinguishable from a variant without this list.
  */
-export function protectedBundleIds(config: Config): Set<string> {
+export function protectedBundleIds(targets: ResolvedTarget[], config: Config): Set<string> {
   const base = config.project.baseBundleId;
   return new Set([
     base,
-    ...config.variant.targets
+    ...targets
       .filter((target) => target.bundleIdSuffix)
       .map((target) => `${base}.${target.bundleIdSuffix}`),
   ]);
 }
 
 /** Last line of defence: called immediately before every DELETE. */
-export function assertDeletable(identifier: string, config: Config): void {
+export function assertDeletable(
+  identifier: string,
+  protectedIds: Set<string>,
+  config: Config,
+): void {
   const base = config.project.baseBundleId;
-  if (protectedBundleIds(config).has(identifier)) {
+  if (protectedIds.has(identifier)) {
     fail(
       `refusing to delete ${identifier} — it is a core identifier, not a variant.\n` +
         '  This is a bug: it should never have been selected. Nothing further was deleted.',
@@ -122,9 +127,9 @@ export function groupVariants(
   bundleIds: RegisteredBundleId[],
   profiles: RegisteredProfile[],
   config: Config,
+  protectedIds: Set<string>,
 ): RegisteredVariant[] {
   const prefix = `${config.project.baseBundleId}.`;
-  const protectedIds = protectedBundleIds(config);
   const profilePrefix = config.variant.profilePrefix ?? labelPrefixFor(config);
 
   return bundleIds
@@ -176,7 +181,8 @@ export async function readAccount(
   } else {
     [bundleIds, profiles] = await boundary.report.run('account', 'read the account', read);
   }
-  return { client, variants: groupVariants(bundleIds, profiles, project.config) };
+  const protectedIds = protectedBundleIds(resolveTargets(boundary, project), project.config);
+  return { client, variants: groupVariants(bundleIds, profiles, project.config, protectedIds) };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -292,12 +298,14 @@ async function deleteVariant(
   boundary: Boundary,
   client: AscClient,
   config: Config,
+  protectedIds: Set<string>,
   variant: RegisteredVariant,
 ): Promise<void> {
   // Re-checked here, at the point of no return, rather than trusting whatever
   // selected this variant three functions ago.
-  assertDeletable(variant.app.identifier, config);
-  for (const extension of variant.extensions) assertDeletable(extension.identifier, config);
+  assertDeletable(variant.app.identifier, protectedIds, config);
+  for (const extension of variant.extensions)
+    assertDeletable(extension.identifier, protectedIds, config);
 
   for (const profile of variant.profiles) {
     const result = await client.request('DELETE', `/v1/profiles/${profile.id}`);
@@ -368,11 +376,12 @@ async function removeSelected(
     return { slugs, dryRun: true };
   }
 
+  const protectedIds = protectedBundleIds(resolveTargets(boundary, project), project.config);
   for (const { variant } of selected) {
     await report.run('remove', variant.suffix, async (step) => {
       step.detail(variant.app.identifier);
       step.data({ slug: variant.suffix, bundleId: variant.app.identifier });
-      await deleteVariant(boundary, client, project.config, variant);
+      await deleteVariant(boundary, client, project.config, protectedIds, variant);
     });
   }
   report.done(true, { removed: slugs.length, dryRun: false, slugs });

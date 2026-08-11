@@ -22,6 +22,7 @@ import {
   type RegisteredBundleId,
   type RegisteredProfile,
 } from '../src/bundles.js';
+import type { ResolvedTarget } from '../src/bundle-ids.js';
 import { projectFrom } from '../src/project.js';
 import {
   fakeBoundary,
@@ -30,6 +31,7 @@ import {
   type StubbedRequest,
 } from './helpers/fake-boundary.js';
 import { testConfig } from './helpers/config.js';
+import { PROJECT_FILES } from './helpers/pbxproj.js';
 
 const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
 const KEY_PEM = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
@@ -101,7 +103,10 @@ function accountBoundary(options: AccountOptions = {}): FakeBoundary {
     cwd: '/w',
     json: options.json ?? false,
     env: { ASC_API_KEY_ID: 'KEY1', ASC_API_ISSUER_ID: 'ISSUER1' },
-    files: { '/home/dev/.appstoreconnect/private_keys/AuthKey_KEY1.p8': KEY_PEM },
+    files: {
+      ...PROJECT_FILES,
+      '/home/dev/.appstoreconnect/private_keys/AuthKey_KEY1.p8': KEY_PEM,
+    },
     commands: options.commands ?? [],
     requests: [
       {
@@ -149,40 +154,48 @@ afterEach(() => {
 /* protections — carried over wholesale, they are the reason this is safe      */
 /* -------------------------------------------------------------------------- */
 
+/** The targets as the pbxproj resolves them, which is what the guards read. */
+const targets: ResolvedTarget[] = [
+  { name: 'Acme' },
+  { name: 'Upload Widget', bundleIdSuffix: 'uploadwidget' },
+];
+const protectedIds = protectedBundleIds(targets, config);
+
 describe('protectedBundleIds', () => {
   it('covers the base id and the extensions the plain build ships', () => {
-    expect([...protectedBundleIds(config)]).toEqual([
-      'io.acme.app.dev',
-      'io.acme.app.dev.uploadwidget',
-    ]);
+    expect([...protectedIds]).toEqual(['io.acme.app.dev', 'io.acme.app.dev.uploadwidget']);
   });
 });
 
 describe('assertDeletable', () => {
   it('refuses the base bundle id', () => {
-    expect(() => assertDeletable('io.acme.app.dev', config)).toThrow(
+    expect(() => assertDeletable('io.acme.app.dev', protectedIds, config)).toThrow(
       /refusing to delete io\.acme\.app\.dev — it is a core identifier/,
     );
   });
 
   it("refuses the plain build's extension id", () => {
-    expect(() => assertDeletable('io.acme.app.dev.uploadwidget', config)).toThrow(
+    expect(() => assertDeletable('io.acme.app.dev.uploadwidget', protectedIds, config)).toThrow(
       /core identifier/,
     );
   });
 
   it('refuses anything outside this project', () => {
-    expect(() => assertDeletable('io.other.app', config)).toThrow(/not a "io\.acme\.app\.dev\.\*"/);
+    expect(() => assertDeletable('io.other.app', protectedIds, config)).toThrow(
+      /not a "io\.acme\.app\.dev\.\*"/,
+    );
   });
 
   it('allows a variant and its extension', () => {
-    expect(() => assertDeletable('io.acme.app.dev.wave', config)).not.toThrow();
-    expect(() => assertDeletable('io.acme.app.dev.wave.uploadwidget', config)).not.toThrow();
+    expect(() => assertDeletable('io.acme.app.dev.wave', protectedIds, config)).not.toThrow();
+    expect(() =>
+      assertDeletable('io.acme.app.dev.wave.uploadwidget', protectedIds, config),
+    ).not.toThrow();
   });
 });
 
 describe('groupVariants', () => {
-  const variants = groupVariants(ACCOUNT_BUNDLE_IDS, ACCOUNT_PROFILES, config);
+  const variants = groupVariants(ACCOUNT_BUNDLE_IDS, ACCOUNT_PROFILES, config, protectedIds);
 
   it('finds only the variants, sorted', () => {
     expect(variants.map((v) => v.suffix)).toEqual(['seededfeed', 'wave']);
@@ -218,7 +231,7 @@ describe('groupVariants', () => {
 /* -------------------------------------------------------------------------- */
 
 describe('firstSeen', () => {
-  const variants = groupVariants(ACCOUNT_BUNDLE_IDS, ACCOUNT_PROFILES, config);
+  const variants = groupVariants(ACCOUNT_BUNDLE_IDS, ACCOUNT_PROFILES, config, protectedIds);
 
   it('takes the earliest profile, since Apple does not date a bundle id', () => {
     expect(firstSeen(variants.find((v) => v.suffix === 'wave')!)).toBe('2026-07-02');
@@ -232,7 +245,7 @@ describe('firstSeen', () => {
 });
 
 describe('renderTable', () => {
-  const variants = groupVariants(ACCOUNT_BUNDLE_IDS, ACCOUNT_PROFILES, config);
+  const variants = groupVariants(ACCOUNT_BUNDLE_IDS, ACCOUNT_PROFILES, config, protectedIds);
 
   it('aligns the columns', () => {
     expect(renderTable(variants)).toBe(
@@ -255,7 +268,7 @@ describe('renderTable', () => {
 
 describe('toRecords', () => {
   it('is the shape a script consumes', () => {
-    const variants = groupVariants(ACCOUNT_BUNDLE_IDS, ACCOUNT_PROFILES, config);
+    const variants = groupVariants(ACCOUNT_BUNDLE_IDS, ACCOUNT_PROFILES, config, protectedIds);
     expect(toRecords(variants)[1]).toEqual({
       slug: 'wave',
       bundleId: 'io.acme.app.dev.wave',

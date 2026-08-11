@@ -22,7 +22,9 @@ import {
   targetEntityName,
 } from '../src/provision.js';
 import { fakeBoundary, type FakeBoundary } from './helpers/fake-boundary.js';
+import type { ResolvedTarget } from '../src/bundle-ids.js';
 import { testConfig } from './helpers/config.js';
+import { PROJECT_FILES } from './helpers/pbxproj.js';
 
 const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
 const KEY_PEM = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
@@ -79,13 +81,19 @@ const config = testConfig({
 
 const project = projectFrom('/w/jetbridge.config.json', config);
 
+/** The extension, as the project file resolves it. */
+const extension: ResolvedTarget = { name: 'Upload Widget', bundleIdSuffix: 'uploadwidget' };
+
 const boundaryWithCredentials = (
   overrides: Parameters<typeof fakeBoundary>[0] = {},
 ): FakeBoundary =>
   fakeBoundary({
     homedir: '/home/dev',
     env: { ASC_API_KEY_ID: 'KEY1', ASC_API_ISSUER_ID: 'ISSUER1' },
-    files: { '/home/dev/.appstoreconnect/private_keys/AuthKey_KEY1.p8': KEY_PEM },
+    files: {
+      ...PROJECT_FILES,
+      '/home/dev/.appstoreconnect/private_keys/AuthKey_KEY1.p8': KEY_PEM,
+    },
     commands: [
       {
         match: ['security', 'find-identity'],
@@ -101,9 +109,7 @@ describe('bundle ids', () => {
   });
 
   it('nests an extension under the app id', () => {
-    expect(targetBundleId(config.variant.targets[1]!, 'wave', config)).toBe(
-      'io.acme.app.dev.wave.uploadwidget',
-    );
+    expect(targetBundleId(extension, 'wave', config)).toBe('io.acme.app.dev.wave.uploadwidget');
   });
 
   it('names the app entity after the home-screen label', () => {
@@ -111,9 +117,7 @@ describe('bundle ids', () => {
   });
 
   it('names an extension after the app plus the target', () => {
-    expect(targetEntityName(config.variant.targets[1]!, 'Acme Wave')).toBe(
-      'Acme Wave Upload Widget',
-    );
+    expect(targetEntityName(extension, 'Acme Wave')).toBe('Acme Wave Upload Widget');
   });
 
   it('sanitises the entity name, because App Store Connect rejects punctuation', () => {
@@ -404,9 +408,7 @@ describe('profileNameFor', () => {
   });
 
   it('names an extension profile after its bundle-id segment', () => {
-    expect(profileNameFor(config.variant.targets[1]!, 'wave', config)).toBe(
-      'Acme wave uploadwidget',
-    );
+    expect(profileNameFor(extension, 'wave', config)).toBe('Acme wave uploadwidget');
   });
 
   it('honours an explicit profile prefix', () => {
@@ -495,6 +497,7 @@ describe('provisionVariant', () => {
     const answers = answersForFullRun();
     const boundary = boundaryWithCredentials({
       files: {
+        ...PROJECT_FILES,
         '/home/dev/.appstoreconnect/private_keys/AuthKey_KEY1.p8': KEY_PEM,
         '/w/ios/Acme.variant.entitlements': `<plist version="1.0"><dict>
 	<key>aps-environment</key><string>development</string>

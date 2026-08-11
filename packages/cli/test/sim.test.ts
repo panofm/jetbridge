@@ -9,6 +9,7 @@ import { projectFrom } from '../src/project.js';
 import { simInstall } from '../src/sim.js';
 import { fakeBoundary } from './helpers/fake-boundary.js';
 import { testConfig } from './helpers/config.js';
+import { PBXPROJ, PBXPROJ_PATH } from './helpers/pbxproj.js';
 
 const config = testConfig({
   variant: { displayName: 'Acme Dev', targets: [{ name: 'Acme' }] },
@@ -46,7 +47,7 @@ const boundaryFor = (suffix: string) =>
   fakeBoundary({
     homedir: '/home/dev',
     files: {
-      '/w/ios/Acme.xcodeproj': 'x',
+      [`/w/${PBXPROJ_PATH}`]: PBXPROJ,
       [`${appAt(suffix)}/Info.plist`]: '<plist/>',
     },
     commands: [{ match: ['xcrun', 'simctl', 'list'], stdout: SIM_LIST }],
@@ -110,7 +111,9 @@ describe('simInstall', () => {
         displayName: 'Acme Wave',
         configuration: 'Beta',
       }),
-    ).rejects.toThrow(/is not one of this project's build configurations/);
+    ).rejects.toThrow(
+      /"Beta" is not one of this project's build configurations \(Debug, Release, Staging\)/,
+    );
   });
 
   it('never talks to App Store Connect', async () => {
@@ -209,10 +212,11 @@ describe('simInstall', () => {
 
   it('regenerates the project when the config says it is generated', async () => {
     const generated = testConfig({
-      project: { projectYml: 'project.yml', xcodegen: true },
+      project: { xcodegen: true },
       variant: { displayName: 'Acme Dev', targets: [{ name: 'Acme' }] },
     });
     const boundary = boundaryFor('wave');
+    boundary.fs.write('/w/ios/project.yml', 'name: Acme\n');
     await simInstall(boundary, projectFrom('/w/jetbridge.config.json', generated), {
       suffix: 'wave',
       displayName: 'Acme Wave',
