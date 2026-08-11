@@ -39,6 +39,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "schema": "node scripts/generate-schema.mjs",
+    "check:schema": "node scripts/generate-schema.mjs --check",
     "check:identifiers": "node scripts/check-no-private-identifiers.mjs",
     "check:changeset": "node scripts/check-changeset.mjs",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run check:identifiers && npm run test",
