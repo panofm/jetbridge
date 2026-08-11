@@ -9,6 +9,7 @@ import chalk from 'chalk';
 import { Command, InvalidArgumentError } from 'commander';
 import { nodeBoundary, type Boundary } from './boundary.js';
 import { listBundles, provisionBundles, pruneBundles, removeBundles } from './bundles.js';
+import { loadEnv } from './env.js';
 import { runInit } from './init.js';
 import { otaInstall, reindex } from './ota.js';
 import { clackPrompter } from './prompts.js';
@@ -70,7 +71,11 @@ program
 const open = (): { boundary: Boundary; project: Project } => {
   const boundary = nodeBoundary({ nonInteractive: Boolean(program.opts().nonInteractive) });
   const configPath = program.opts().configFile as string | undefined;
-  return { boundary, project: loadProject(boundary, { configPath }) };
+  const project = loadProject(boundary, { configPath });
+  // After the project is found, because the files are read relative to its
+  // root — and before any command runs, because credentials come from them.
+  loadEnv(boundary, project.root);
+  return { boundary, project };
 };
 
 const parseName = (value: string): string => {
