@@ -1,7 +1,7 @@
 {
   "name": "jetbridge",
   "version": "0.1.0-rc.1",
-  "description": "Build, sign and deliver iOS dev builds — to a simulator, down a cable, or over the air to your own bucket.",
+  "description": "Build, sign and deliver iOS dev builds \u2014 to a simulator, down a cable, or over the air to your own bucket.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -25,7 +25,8 @@
     "templates"
   ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "repository": {
     "type": "git",

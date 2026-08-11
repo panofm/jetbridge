@@ -10,8 +10,11 @@ name: Release (npm)
 #   - That version PR is merged, leaving no changesets → this job builds and
 #     runs `changeset publish`, then pushes the git tag.
 #
-# Requires the NPM_TOKEN secret (an automation token) in the `npm-publish`
-# environment.
+# No token anywhere. npm is restricting tokens that bypass 2FA for direct
+# publishing, and a token that needs a code from an authenticator cannot work
+# unattended — so the job authenticates as itself through OIDC. Configure the
+# trusted publisher once on npmjs.com: the package's Settings, this repository,
+# this workflow file.
 
 # Only the two pushes that can produce work trigger this: one that lands a
 # changeset, and the version PR's own merge. Every other push to main would
@@ -33,8 +36,10 @@ concurrency:
 permissions:
   contents: write # the version commit, the git tag, the release
   pull-requests: write # open and update the version packages PR
-  # No id-token: npm provenance requires a PUBLIC source repository, and this
-  # repo is private — npm rejects provenance with E422. Auth is NPM_TOKEN.
+  # Trusted publishing: the job authenticates to npm as itself, so no token is
+  # stored anywhere. npm is restricting token-based publishing that skips 2FA,
+  # and a token that needs an interactive code cannot work in CI by definition.
+  id-token: write
 
 jobs:
   release:
@@ -69,11 +74,6 @@ jobs:
           title: 'chore(release): version packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # NODE_AUTH_TOKEN feeds the .npmrc setup-node wrote; NPM_TOKEN keeps
-          # the action on token auth rather than OIDC trusted publishing. Both
-          # are the same automation token.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Make the run self-explanatory, instead of leaving the outcome buried in
       # the action's logs.
