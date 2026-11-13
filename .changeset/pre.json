@@ -4,5 +4,9 @@
   "initialVersions": {
     "jetbridge": "0.0.0"
   },
-  "changesets": ["cold-pandas-argue", "paginate-listings"]
+  "changesets": [
+    "app-by-product-name",
+    "cold-pandas-argue",
+    "paginate-listings"
+  ]
 }

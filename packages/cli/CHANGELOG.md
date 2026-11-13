@@ -1,5 +1,13 @@
 # jetbridge
 
+## 0.1.0-rc.3
+
+### Patch Changes
+
+- [#7](https://github.com/panofm/jetbridge/pull/7) [`b1f3247`](https://github.com/panofm/jetbridge/commit/b1f32473c9c19ddc5927c9776bba7d1d49f12b2c) Thanks [@adamazad](https://github.com/adamazad)! - `install` and `install --device` now find the built app by its product name, not by the scheme's name.
+
+  The path was `<scheme>.app`, so a project whose `PRODUCT_NAME` differs from its scheme — scheme `Acme`, app `Wave.app` — failed with "produced no app". Worse, right after such a rename the cached DerivedData still holds the old `<scheme>.app`, and that stale build is what would have installed. jetbridge now asks `xcodebuild -showBuildSettings` for the scheme's one application product after the build, shown as its own step (a few seconds). When xcodebuild cannot answer, it falls back to `<scheme>.app` and says so. `link` was never affected: it reads the app's path out of the archive.
+
 ## 0.1.0-rc.2
 
 ### Patch Changes
