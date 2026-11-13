@@ -34,7 +34,7 @@ jobs:
       - name: Publishable changes carry a changeset
         if: github.event_name == 'pull_request'
         run: |
-          git fetch origin ${{ github.base_ref }} --depth=0
+          git fetch origin ${{ github.base_ref }}
           CHANGESET_BASE_REF=origin/${{ github.base_ref }} bun scripts/check-changeset.mjs
 
       - run: bun run typecheck
