@@ -14,12 +14,12 @@ import type { Boundary } from './boundary.js';
 import {
   build,
   buildNumber,
+  builtApp,
   generateProject,
-  productPath,
   requireToolchain,
   runHook,
 } from './build.js';
-import { fail, type Project } from './project.js';
+import type { Project } from './project.js';
 import {
   bootSimulator,
   describeSimulator,
@@ -121,10 +121,7 @@ export async function simInstall(
   };
   await build(boundary, project, request);
 
-  const appPath = productPath(request, config, 'iphonesimulator');
-  if (!boundary.fs.exists(appPath)) {
-    fail(`the build reported success but produced no app at ${appPath}`);
-  }
+  const appPath = await builtApp(boundary, project, request, 'iphonesimulator');
 
   await runHook(boundary, project, 'postBuild');
 

@@ -6,6 +6,7 @@
  * installed.
  */
 import { join } from 'node:path';
+import { z } from 'zod';
 import { localCredentials } from './asc.js';
 import type { Boundary, CommandResult } from './boundary.js';
 import { resolveTargets } from './bundle-ids.js';
@@ -85,19 +86,106 @@ export function buildArgs(boundary: Boundary, project: Project, request: BuildRe
   ];
 }
 
-/** Where a built `.app` lands for a given configuration and platform. */
+export type Platform = 'iphoneos' | 'iphonesimulator';
+
+/** Where a build product lands for a given configuration and platform. */
 export function productPath(
   request: Pick<BuildRequest, 'derivedDataPath' | 'configuration'>,
-  config: Config,
-  platform: 'iphoneos' | 'iphonesimulator',
+  productName: string,
+  platform: Platform,
 ): string {
   return join(
     request.derivedDataPath,
     'Build',
     'Products',
     `${request.configuration}-${platform}`,
-    `${config.project.scheme}.app`,
+    productName,
   );
+}
+
+/**
+ * `-showBuildSettings` for the build that just ran: the same scheme,
+ * configuration, destination and DerivedData, plus the variant overrides a
+ * `PRODUCT_NAME` could refer to. No provisioning flags — it signs nothing.
+ */
+export function settingsArgs(project: Project, request: BuildRequest): string[] {
+  return [
+    '-showBuildSettings',
+    '-json',
+    ...project.xcodebuildTarget(),
+    '-scheme',
+    project.config.project.scheme,
+    '-configuration',
+    request.configuration,
+    '-destination',
+    request.destination,
+    '-derivedDataPath',
+    request.derivedDataPath,
+    ...variantSettings(request.suffix, request.displayName),
+  ];
+}
+
+const SettingsOutput = z.array(
+  z.object({
+    buildSettings: z.object({
+      PRODUCT_TYPE: z.string().optional(),
+      FULL_PRODUCT_NAME: z.string().optional(),
+    }),
+  }),
+);
+
+/**
+ * The app's file name — `Acme.app` — from `-showBuildSettings -json`, or null
+ * unless the scheme builds exactly one app. The exact product type leaves out
+ * watch apps, App Clips and iMessage apps.
+ */
+export function appProductName(stdout: string): string | null {
+  let json: unknown;
+  try {
+    json = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  const parsed = SettingsOutput.safeParse(json);
+  if (!parsed.success) return null;
+  const apps = parsed.data.filter(
+    (entry) => entry.buildSettings.PRODUCT_TYPE === 'com.apple.product-type.application',
+  );
+  return apps.length === 1 ? (apps[0]!.buildSettings.FULL_PRODUCT_NAME ?? null) : null;
+}
+
+/**
+ * The `.app` the build just produced, named by the build settings.
+ *
+ * `PRODUCT_NAME` is the project's choice, and a scheme `Acme` that builds
+ * `Wave.app` is ordinary. Guessing `<scheme>.app` there is worse than failing:
+ * the cached DerivedData still holds the app from before the rename, and that
+ * stale build is what would install. The scheme's name is only the fallback for
+ * when xcodebuild cannot answer, and the run says so.
+ */
+export async function builtApp(
+  boundary: Boundary,
+  project: Project,
+  request: BuildRequest,
+  platform: Platform,
+): Promise<string> {
+  const name = await boundary.report.run('settings', 'read build settings', async (step) => {
+    const result = await boundary.exec.run('xcodebuild', settingsArgs(project, request), {
+      cwd: project.root,
+      allowFail: true,
+    });
+    const found = result.ok ? appProductName(result.stdout) : null;
+    const name = found ?? `${project.config.project.scheme}.app`;
+    if (!found) {
+      boundary.report.note(`the build settings name no single app — assuming ${name}`);
+    }
+    step.detail(name);
+    step.data({ product: name });
+    return name;
+  });
+  const path = productPath(request, name, platform);
+  if (!boundary.fs.exists(path)) fail(`the build reported success but produced no app at ${path}`);
+  return path;
 }
 
 /** Fail before the slow steps if a required tool or the project is missing. */

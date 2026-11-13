@@ -136,6 +136,7 @@ jetbridge install --device --json | jq -c 'select(.event == "step" and .phase ==
 {"event":"signing","decision":"cached","profiles":["Acme wave app","Acme wave uploadwidget"]}
 {"event":"step","step":"build","phase":"start"}
 {"event":"step","step":"build","phase":"end","ok":true,"durationMs":72000,"buildNumber":"1786437647","configuration":"Debug"}
+{"event":"step","step":"settings","phase":"end","ok":true,"durationMs":5000,"product":"Acme.app"}
 {"event":"step","step":"install","phase":"end","ok":true,"durationMs":18000,"device":{"id":"10BFE051","name":"Dev's 17 Pro"},"bundleId":"io.acme.app.dev.wave"}
 {"event":"done","ok":true,"durationMs":113000,"devices":1,"bundleId":"io.acme.app.dev.wave"}
 ```

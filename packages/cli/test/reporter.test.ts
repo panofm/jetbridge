@@ -12,6 +12,7 @@ import { createReporter, formatDuration, type Reporter } from '../src/reporter.j
 import type { DevicectlDevice } from '../src/devices.js';
 import { projectFrom, type Project } from '../src/project.js';
 import { wiredInstall } from '../src/wired.js';
+import { settingsJson } from './helpers/build-settings.js';
 import { testConfig } from './helpers/config.js';
 import {
   fakeBoundary,
@@ -324,6 +325,10 @@ function installBoundary(devices: DevicectlDevice[], over: FakeBoundaryOptions =
       { match: ['command', '-v'] },
       { match: ['xcrun', 'devicectl', 'list', 'devices'] },
       { match: ['xcodebuild', 'build'], durationMs: 72_000 },
+      {
+        match: ['xcodebuild', '-showBuildSettings'],
+        stdout: settingsJson({ target: 'Acme', product: 'Acme.app' }),
+      },
       ...devices.map((d, index) => ({
         match: ['devicectl', 'device', 'install', 'app', '--device', d.identifier!],
         durationMs: 18_000 + index * 4_000,
@@ -384,6 +389,8 @@ describe('an install, reported', () => {
       'step',
       'step',
       'step',
+      'step',
+      'step',
       'done',
     ]);
     expect(events[0]).toEqual({
@@ -410,6 +417,13 @@ describe('an install, reported', () => {
       buildNumber: '1700000000',
     });
     expect(events[6]).toMatchObject({
+      event: 'step',
+      step: 'settings',
+      phase: 'end',
+      ok: true,
+      product: 'Acme.app',
+    });
+    expect(events[8]).toMatchObject({
       event: 'step',
       step: 'install',
       phase: 'end',

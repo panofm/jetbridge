@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import type { DevicectlDevice } from '../src/devices.js';
 import { projectFrom, type Project } from '../src/project.js';
 import { derivedDataPath, scratchPath, wiredInstall } from '../src/wired.js';
+import { settingsJson } from './helpers/build-settings.js';
 import { testConfig } from './helpers/config.js';
 import { PBXPROJ as PBXPROJ_FIXTURE, PBXPROJ_PATH, pbxprojWith } from './helpers/pbxproj.js';
 import {
@@ -233,6 +234,27 @@ describe('install', () => {
     expect(call.options.allowFail).toBe(true);
   });
 
+  it('installs the app the build settings name, not a stale one named for the scheme', async () => {
+    // PRODUCT_NAME renamed: the scheme is still Acme, the build makes Wave.app,
+    // and the cached DerivedData still holds the Acme.app from before.
+    const renamed = `${DERIVED_DATA}/Build/Products/Debug-iphoneos/Wave.app`;
+    const boundary = boundaryFor([device('DEV-A', 'iPhone A')], {
+      commands: [
+        { match: ['command', '-v'] },
+        { match: ['xcrun', 'devicectl', 'list', 'devices'] },
+        { match: ['xcodebuild', 'build'] },
+        {
+          match: ['xcodebuild', '-showBuildSettings'],
+          stdout: settingsJson({ target: 'Acme', product: 'Wave.app' }),
+        },
+        installStub('DEV-A'),
+      ],
+      files: { [renamed]: 'MACH-O' },
+    });
+    await wiredInstall(boundary, project, plain);
+    expect(boundary.findCall('devicectl', 'device', 'install')!.args.at(-1)).toBe(renamed);
+  });
+
   it('installs to every reachable device', async () => {
     const devices = [device('DEV-A', 'iPhone A'), device('DEV-B', 'iPhone B', 'localNetwork')];
     const boundary = boundaryFor(devices);
@@ -445,7 +467,7 @@ describe('a variant run against cached profiles', () => {
     let duringBuild = '';
     const inner = boundary.exec.run;
     boundary.exec.run = async (command, args, opts) => {
-      if (command === 'xcodebuild') duringBuild = boundary.fs.read(PBXPROJ);
+      if (command === 'xcodebuild' && args[0] === 'build') duringBuild = boundary.fs.read(PBXPROJ);
       return inner(command, args, opts);
     };
     await wiredInstall(boundary, variantProject, variantOptions);
