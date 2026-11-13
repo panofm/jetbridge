@@ -485,7 +485,7 @@ async function runArchive(
   });
 }
 
-/** Export the .ipa and return its path. The filename is the scheme's, not ours. */
+/** Export the .ipa and return its path. The filename is the product's, not ours. */
 async function runExport(
   boundary: Boundary,
   project: Project,

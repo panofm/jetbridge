@@ -7,6 +7,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { projectFrom } from '../src/project.js';
 import { simInstall } from '../src/sim.js';
+import { settingsJson } from './helpers/build-settings.js';
 import { fakeBoundary } from './helpers/fake-boundary.js';
 import { testConfig } from './helpers/config.js';
 import { PBXPROJ, PBXPROJ_PATH } from './helpers/pbxproj.js';
@@ -61,6 +62,29 @@ describe('simInstall', () => {
     const lines = boundary.commandLines();
     expect(lines).toContain(`xcrun simctl install UDID-BOOTED ${appAt('wave')}`);
     expect(lines).toContain('xcrun simctl launch UDID-BOOTED io.acme.app.dev.wave');
+  });
+
+  it('installs the app the build settings name, when it is not named for the scheme', async () => {
+    const renamed = appAt('wave').replace(/Acme\.app$/, 'Wave.app');
+    const boundary = fakeBoundary({
+      homedir: '/home/dev',
+      files: {
+        [`/w/${PBXPROJ_PATH}`]: PBXPROJ,
+        // A stale build from before PRODUCT_NAME changed.
+        [`${appAt('wave')}/Info.plist`]: '<plist/>',
+        [`${renamed}/Info.plist`]: '<plist/>',
+      },
+      commands: [
+        { match: ['xcrun', 'simctl', 'list'], stdout: SIM_LIST },
+        {
+          match: ['xcodebuild', '-showBuildSettings'],
+          stdout: settingsJson({ target: 'Acme', product: 'Wave.app' }),
+        },
+      ],
+      defaultCommandResult: { code: 0 },
+    });
+    await simInstall(boundary, project, { suffix: 'wave', displayName: 'Acme Wave' });
+    expect(boundary.commandLines()).toContain(`xcrun simctl install UDID-BOOTED ${renamed}`);
   });
 
   it('pins the build destination to the resolved simulator', async () => {

@@ -6,20 +6,24 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  appProductName,
   authArgs,
   explainBuildFailure,
   build,
   buildArgs,
   buildNumber,
+  builtApp,
   generateProject,
   productPath,
   requireToolchain,
   runHook,
+  settingsArgs,
   type BuildRequest,
 } from '../src/build.js';
 import { projectFrom, type Project } from '../src/project.js';
 import { testConfig } from './helpers/config.js';
 import { fakeBoundary, type FakeBoundary } from './helpers/fake-boundary.js';
+import { APPLICATION, settingsJson } from './helpers/build-settings.js';
 import { PROJECT_FILES } from './helpers/pbxproj.js';
 
 /** Reads the project file, which is where the extension bundle ids live. */
@@ -208,15 +212,120 @@ describe('buildArgs', () => {
 
 describe('productPath', () => {
   it('points at the device build product', () => {
-    expect(productPath(request(), testConfig(), 'iphoneos')).toBe(
+    expect(productPath(request(), 'Acme.app', 'iphoneos')).toBe(
       '/dd/Build/Products/Debug-iphoneos/Acme.app',
     );
   });
 
   it('points at the simulator build product for the same configuration', () => {
+    expect(productPath(request({ configuration: 'Release' }), 'Acme.app', 'iphonesimulator')).toBe(
+      '/dd/Build/Products/Release-iphonesimulator/Acme.app',
+    );
+  });
+});
+
+const APP = APPLICATION;
+
+describe('settingsArgs', () => {
+  it('asks about the same build, and signs nothing', () => {
     expect(
-      productPath(request({ configuration: 'Release' }), testConfig(), 'iphonesimulator'),
-    ).toBe('/dd/Build/Products/Release-iphonesimulator/Acme.app');
+      settingsArgs(projectOf(), request({ suffix: 'wave', displayName: 'Acme Wave' })),
+    ).toEqual([
+      '-showBuildSettings',
+      '-json',
+      '-project',
+      '/w/ios/Acme.xcodeproj',
+      '-scheme',
+      'Acme',
+      '-configuration',
+      'Debug',
+      '-destination',
+      'generic/platform=iOS',
+      '-derivedDataPath',
+      '/dd',
+      'JETBRIDGE_SUFFIX=.wave',
+      'JETBRIDGE_DISPLAY_NAME=Acme Wave',
+    ]);
+  });
+});
+
+describe('appProductName', () => {
+  it('names the app by its product, not its target or scheme', () => {
+    expect(appProductName(settingsJson({ target: 'Acme', type: APP, product: 'Wave.app' }))).toBe(
+      'Wave.app',
+    );
+  });
+
+  it('ignores watch apps, App Clips and extensions built beside the app', () => {
+    const stdout = settingsJson(
+      { target: 'Acme', type: APP, product: 'Wave.app' },
+      { target: 'AcmeWatch', type: `${APP}.watchapp2`, product: 'AcmeWatch.app' },
+      { target: 'AcmeClip', type: `${APP}.on-demand-install-capable`, product: 'Clip.app' },
+      { target: 'AcmeWidget', type: 'com.apple.product-type.app-extension', product: 'W.appex' },
+    );
+    expect(appProductName(stdout)).toBe('Wave.app');
+  });
+
+  it('is null when the scheme builds no app, or more than one', () => {
+    expect(appProductName(settingsJson())).toBeNull();
+    expect(
+      appProductName(
+        settingsJson(
+          { target: 'Acme', type: APP, product: 'Acme.app' },
+          { target: 'Other', type: APP, product: 'Other.app' },
+        ),
+      ),
+    ).toBeNull();
+  });
+
+  it('is null for output that is not the settings array', () => {
+    expect(appProductName('')).toBeNull();
+    expect(appProductName('Build settings for action build and target Acme:')).toBeNull();
+    expect(appProductName('{"buildSettings": {}}')).toBeNull();
+  });
+});
+
+describe('builtApp', () => {
+  const RENAMED = '/dd/Build/Products/Debug-iphoneos/Wave.app';
+  const SCHEME_NAMED = '/dd/Build/Products/Debug-iphoneos/Acme.app';
+
+  it('finds the app by the product name the build settings report', async () => {
+    const boundary = fakeBoundary({
+      // The scheme-named app is a stale build from before the rename.
+      files: { [`${RENAMED}/Info.plist`]: '<plist/>', [`${SCHEME_NAMED}/Info.plist`]: '<plist/>' },
+      commands: [
+        {
+          match: ['xcodebuild', '-showBuildSettings'],
+          stdout: settingsJson({ target: 'Acme', type: APP, product: 'Wave.app' }),
+        },
+      ],
+    });
+    expect(await builtApp(boundary, projectOf(), request(), 'iphoneos')).toBe(RENAMED);
+    expect(boundary.findCall('xcodebuild', '-showBuildSettings')!.options.cwd).toBe('/w');
+  });
+
+  it('falls back to the scheme name when xcodebuild cannot answer, and says so', async () => {
+    const boundary = fakeBoundary({
+      files: { [`${SCHEME_NAMED}/Info.plist`]: '<plist/>' },
+      commands: [{ match: ['xcodebuild', '-showBuildSettings'], code: 65 }],
+    });
+    expect(await builtApp(boundary, projectOf(), request(), 'iphoneos')).toBe(SCHEME_NAMED);
+    expect(boundary.humanOutput()).toContain('assuming Acme.app');
+  });
+
+  it('refuses when the named app is not there', async () => {
+    const boundary = fakeBoundary({
+      files: { [`${SCHEME_NAMED}/Info.plist`]: '<plist/>' },
+      commands: [
+        {
+          match: ['xcodebuild', '-showBuildSettings'],
+          stdout: settingsJson({ target: 'Acme', type: APP, product: 'Wave.app' }),
+        },
+      ],
+    });
+    await expect(builtApp(boundary, projectOf(), request(), 'iphoneos')).rejects.toThrow(
+      `produced no app at ${RENAMED}`,
+    );
   });
 });
 

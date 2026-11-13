@@ -9,8 +9,8 @@ import type { Boundary } from './boundary.js';
 import {
   build,
   buildNumber,
+  builtApp,
   generateProject,
-  productPath,
   requireToolchain,
   runHook,
 } from './build.js';
@@ -221,31 +221,25 @@ export async function wiredInstall(
 
   await runHook(boundary, project, 'preBuild');
 
+  const request = {
+    configuration,
+    suffix: options.suffix,
+    displayName: options.displayName,
+    profiles,
+    derivedDataPath: derivedData,
+    destination: 'generic/platform=iOS',
+    buildNumber: buildNumber(boundary),
+    verbose: options.verbose,
+  };
   // The swap is restored the moment the build returns — before the install runs
   // — so a failed or hung install can never leave the working tree dirty.
-  const appPath = await withEntitlementSwap(
+  await withEntitlementSwap(
     boundary,
     project,
     { suffix: options.suffix, backupPath: join(scratch, 'project.pbxproj.orig'), configuration },
-    async () => {
-      const request = {
-        configuration,
-        suffix: options.suffix,
-        displayName: options.displayName,
-        profiles,
-        derivedDataPath: derivedData,
-        destination: 'generic/platform=iOS',
-        buildNumber: buildNumber(boundary),
-        verbose: options.verbose,
-      };
-      await build(boundary, project, request);
-      const built = productPath(request, config, 'iphoneos');
-      if (!boundary.fs.exists(built)) {
-        fail(`the build reported success but produced no app at ${built}`);
-      }
-      return built;
-    },
+    () => build(boundary, project, request),
   );
+  const appPath = await builtApp(boundary, project, request, 'iphoneos');
 
   await runHook(boundary, project, 'postBuild');
 
